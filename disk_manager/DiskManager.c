@@ -645,11 +645,7 @@ int FormatParttion(int fpart, unsigned long filesize, unsigned long lAviNum,unsi
    	//有实际簇的个数得到的视频文件数
    	lClust32 -= (10*1024*1024)/(mbs.cluster_size * DEFAULT_SECTOR_SIZE);  //去掉10M的空间不分配
     //unsigned long lActualAviNum = (lClust32 - (lStartClu -2) - PIC_PARTITION_SIZE)/lClustersofFile;
-	#if CLOUD_STORAGE
 	unsigned long clu = (FILE_MAX_LENTH) / (mbs.cluster_size * DEFAULT_SECTOR_SIZE);
-	#else
-	unsigned long clu = (MP4_MAX_LENTH + JPEG_MAX_LENTH) / (mbs.cluster_size * DEFAULT_SECTOR_SIZE);
-	#endif
 	unsigned long lActualAviNum = lClust32  / clu;
 
 	printf("clu=%d lActualAviNum=%d lClust32=%d\n",clu,lActualAviNum,lClust32);
@@ -695,15 +691,9 @@ int FormatParttion(int fpart, unsigned long filesize, unsigned long lAviNum,unsi
 			num=num/10;
 		}
 		sz[0] = 0xE5;
-	#if CLOUD_STORAGE
 		strcpy(&sz[6],"~1DAT");
 		memset(longName,0,sizeof(longName));
 		sprintf(longName,"%d%s",lAviCount + 1,".H264");
-	#else
-		strcpy(&sz[6],"~1MP4");
-		memset(longName,0,sizeof(longName));
-		sprintf(longName,"%d%s",lAviCount + 1,".mp4");
-	#endif
 		//CreateFileItem( &pRootDir[lAviCount+1],sz,lStartClu,filesize,mbs.cluster_size, 0x20);
 		CreateLongFileItem(&pRootDir[lAviCount+1],sz,longName,lStartClu,filesize,mbs.cluster_size,0x20);
 
@@ -904,24 +894,18 @@ int FormatParttion(int fpart, unsigned long filesize, unsigned long lAviNum,unsi
 	}	
 
 	gHeadIndex.JpegStartEA  = lseek(fpart,0,SEEK_CUR);
-	#if CLOUD_STORAGE
 	gHeadIndex.ChildStartCluster = ppIndex->startCluster + FILE_MAX_LENTH/(gHeadIndex.ClusterSize*DEFAULT_SECTOR_SIZE);
 	gHeadIndex.ChildStartSector = ppIndex->DataSectorsNum + FILE_MAX_LENTH/DEFAULT_SECTOR_SIZE;
 	gHeadIndex.ChildClusterListEA = ppIndex->CluSectorsNum* DEFAULT_SECTOR_SIZE 
 		+  ppIndex->CluSectorsEA + FILE_MAX_LENTH /(gHeadIndex.ClusterSize*DEFAULT_SECTOR_SIZE)*4;
-	#else
-	gHeadIndex.ChildStartCluster = ppIndex->startCluster + MP4_MAX_LENTH /(gHeadIndex.ClusterSize*DEFAULT_SECTOR_SIZE);
-	gHeadIndex.ChildStartSector = ppIndex->DataSectorsNum + MP4_MAX_LENTH/DEFAULT_SECTOR_SIZE;
-	gHeadIndex.ChildClusterListEA = ppIndex->CluSectorsNum* DEFAULT_SECTOR_SIZE 
-		+  ppIndex->CluSectorsEA + MP4_MAX_LENTH /(gHeadIndex.ClusterSize*DEFAULT_SECTOR_SIZE)*4;
-	#endif
+
 	gHeadIndex.ChildItemEA = ppIndex->DirSectorsNum*DEFAULT_SECTOR_SIZE + ppIndex->DirSectorsEA + LONG_DIR_ITEM_SIZE;
 
 	FREE();
 	sync();
 
 	printf( "cblocks..8888 do_success!\n "  );
-	#if CLOUD_STORAGE
+
 	//更新索引标志
 	gHeadIndex.FlagIndexHead = FLAG_INDEX_HEAD;
 	gHeadIndex.CurrIndexPos = 0;
@@ -933,10 +917,7 @@ int FormatParttion(int fpart, unsigned long filesize, unsigned long lAviNum,unsi
 		return -1;
 	}
 	sync();
-	#else
-	FormatjpegDir(fpart);
-	#endif
-	
+
 	return 0;
 }
 
@@ -1172,17 +1153,11 @@ int Storage_Write_gos_index(int fpart,enum RECORD_FILE_TYPE fileType)
 {
 	unsigned long all_gos_indexSize;
 
-#if CLOUD_STORAGE
 	if( NULL == gAVIndexList || (!StorageCheckSDExist()))
 	{
 		return -1;
 	}
-#else
-	if(NULL == gMp4IndexList || NULL == gJpegIndexList || (!StorageCheckSDExist()))
-	{
-		return -1;
-	}
-#endif
+
 	//写索引头
 	Storage_Lock();
 	lseek64(fpart,gHeadIndex.HeadStartSector * DEFAULT_SECTOR_SIZE,SEEK_SET);
@@ -1558,18 +1533,14 @@ int Storage_Init(int mkfs_vfat)
 		sprintf(command,"umount -fl %s",SDDirName);
 		StoragepopenRead(command);
 		//进行预分配	
-		#if CLOUD_STORAGE
 		int bRet = FormatParttion(fPart, FILE_MAX_LENTH, lAviNumtemp, lLogSizeMtemp );	
-		#else
-		int bRet = FormatParttion(fPart, MP4_MAX_LENTH, lAviNumtemp, lLogSizeMtemp );	
-		#endif
+
 		memset(command,0,sizeof(command));
 		sprintf(command,"mount -t vfat %s %s",szPartName,SDDirName);
 		StoragepopenRead(command);
 	}
 
 	//分配内存给磁盘索引
-	#if CLOUD_STORAGE
 	unsigned long all_gos_indexSize = sizeof(GosIndex) * gHeadIndex.lRootDirFileNum;
 	if ((gAVIndexList = (struct GosIndex *)malloc (all_gos_indexSize)) == NULL)
 	{
@@ -1579,28 +1550,6 @@ int Storage_Init(int mkfs_vfat)
 	printf("all_gos_indexSize ------------------>  %d\n",all_gos_indexSize);
 	memset(gAVIndexList, 0, all_gos_indexSize);
 	read(fPart,&gAVIndexList[0],all_gos_indexSize);
-	#else
-	unsigned long all_gos_indexSize = sizeof(GosIndex) * gHeadIndex.lRootDirFileNum;
-	if ((gMp4IndexList = (struct GosIndex *)malloc (all_gos_indexSize)) == NULL)
-	{
-		printf("unable to allocate space for gMp4IndexList in memory\n");
-		return -1;
-	}
-	memset(gMp4IndexList, 0, all_gos_indexSize);
-	read(fPart,&gMp4IndexList[0],all_gos_indexSize);
-	
-	all_gos_indexSize = sizeof(GosIndex) * gHeadIndex.lJpegFileNum;
-	if ((gJpegIndexList= (struct GosIndex *)malloc (all_gos_indexSize)) == NULL)
-	{
-		free(gMp4IndexList);
-		gMp4IndexList = NULL;
-		printf("unable to allocate space for gJpegIndexList in memory\n");
-		return -1;
-	}
-	memset(gJpegIndexList, 0, all_gos_indexSize);
-	lseek64(fPart,gHeadIndex.JpegStartEA,SEEK_SET);
-	read(fPart,&gJpegIndexList[0],all_gos_indexSize);
-	#endif
 	
 	FormatSdFlag = 0;
 	printf( "storage init do_success!!!\n "  );
@@ -1618,15 +1567,10 @@ int Storage_Close_All()
 	}
 	
 	setMaxWriteSize(0);
-#if CLOUD_STORAGE
+
 	free(gAVIndexList);	
 	gAVIndexList = NULL;	
-#else
-	free(gMp4IndexList);   	
-	free(gJpegIndexList); 	      	 
-	gMp4IndexList = NULL; 	 
-	gJpegIndexList = NULL;  
-#endif
+
 	memset(&gHeadIndex,0,sizeof(HeadIndex));
 	Storage_Unlock();           //非安全退出状态下一定要解锁
 	printf("release all storage memory!!!\n");
@@ -1655,17 +1599,10 @@ char* storage_Open(const char *fileName)
 	{
 		return NULL;
 	}
-#if CLOUD_STORAGE
 	if(NULL == gAVIndexList || NULL == fileName || (!StorageCheckSDExist()))
 	{
 		return NULL;
 	}
-#else
-	if(NULL == gMp4IndexList || NULL == gJpegIndexList || NULL == fileName || (!StorageCheckSDExist()))
-	{
-		return NULL;
-	}
-#endif
 
 	setMaxWriteSize(0);
 
@@ -1675,32 +1612,11 @@ char* storage_Open(const char *fileName)
 	sscanf(fileName,"%04d%02d%02d%02d%02d%02d%c%c%s",&tm_year,&tm_mon,&tm_mday,&tm_hour,
 		&tm_min,&tm_sec,&zero,/*&recordtype,*/&alarmtype,filetype);
 
-#if CLOUD_STORAGE
 	pGos_indexList = &gAVIndexList[1];
 	IndexSum = gHeadIndex.lRootDirFileNum;
 	lAviCount = 1;
 	FileType = RECORD_FILE_H264;
-#else
-	if(strncmp(filetype,pFileTypeString[RECORD_FILE_MP4],strlen(filetype))==0)
-	{
-		pGos_indexList = &gMp4IndexList[1];
-		IndexSum = gHeadIndex.lRootDirFileNum;
-		FileType = RECORD_FILE_MP4;
-		lAviCount = 1;	
-	}
-	else if(strncmp(filetype,pFileTypeString[RECORD_FILE_JPG],strlen(filetype))==0)
-	{
-		pGos_indexList = gJpegIndexList;
-		IndexSum = gHeadIndex.lJpegFileNum + gHeadIndex.lRootDirFileNum;
-		lAviCount = gHeadIndex.lRootDirFileNum;
-		FileType = RECORD_FILE_JPG;
-	}
-	else
-	{
-		return NULL;
-	}
-	
-#endif
+
 
 	if(gHeadIndex.CurrIndexPos == 0 || gHeadIndex.CurrIndexPos >=gHeadIndex.lRootDirFileNum-1)
 	{
@@ -1896,61 +1812,22 @@ int Storage_Close(char* Fileindex,char *fileName,int fpart)
 	{
 		return -1;
 	}
-#if CLOUD_STORAGE
+
 	if( NULL == gAVIndexList || (!StorageCheckSDExist()))
 	{
 		return -1;
 	}
-#else
-	if(NULL == gMp4IndexList || NULL == gJpegIndexList || (!StorageCheckSDExist()))
-	{
-		return -1;
-	}
-#endif
 	
 	setMaxWriteSize(0);
 	
 	struct GosIndex *pGos_indexList;
 
-#if CLOUD_STORAGE
 	pGos_indexList = gAVIndexList;
 	maxFileSize = FILE_MAX_LENTH;
 	IndexSum = gHeadIndex.lRootDirFileNum;
 	lAviCount = 0;
 	FileType = RECORD_FILE_H264;
-#else
-	if(Fileindex < gHeadIndex.lRootDirFileNum)
-	{
-		pGos_indexList = gMp4IndexList;
-		maxFileSize = MP4_MAX_LENTH;
-		IndexSum = gHeadIndex.lRootDirFileNum;
-		lAviCount = 0;
-		FileType = RECORD_FILE_MP4;
-	}
-	else
-	{
-		pGos_indexList = gJpegIndexList;
-		maxFileSize = JPEG_MAX_LENTH;
-		IndexSum = gHeadIndex.lJpegFileNum + gHeadIndex.lRootDirFileNum;
-		lAviCount = gHeadIndex.lRootDirFileNum;
-		FileType = RECORD_FILE_JPG;
-	}
-#endif
 
-	/*for(lAviCount;lAviCount < IndexSum;lAviCount++)
-	{
-		if(pGos_indexList->fileInfo.fileIndex == Fileindex)
-		{
-			pGos_indexList->fileInfo.FileFpart = 0;  //文件连续读写结束了
-			pGos_indexList->DataSectorsEA = 0;
-			break;
-		}
-		pGos_indexList++;
-	}
-	if(lAviCount == IndexSum) //没有找到对应的扇区地址
-	{
-		return -1;
-	}	*/
 	pGos_indexList = (GosIndex*)Fileindex;
 	pGos_indexList->fileInfo.FileFpart = 0;  //文件连续读写结束了
 	pGos_indexList->DataSectorsEA = 0;
@@ -2103,37 +1980,9 @@ int Storage_Close(char* Fileindex,char *fileName,int fpart)
 		strcpy(longName,fileName);
 	}
 
-	#if 0
-	sprintf(longName,"%04d%02d%02d%02d%02d%02d0%c%c%04d%s",tm_year,tm_mon,tm_mday,
-	tm_hour,tm_min,tm_sec,pGos_indexList->fileInfo.recordType+'a',
-	pGos_indexList->fileInfo.alarmType+'a',
-	pGos_indexList->fileInfo.recordDuration,pFileTypeString[FileType]);
-	#endif
-	//pGos_indexList->fileInfo.recordEndTimeStamp = timep;
-	//printf("fd: %d, start: %d, end : %d\n",pGos_indexList->fileInfo.fileIndex,pGos_indexList->fileInfo.recordStartTimeStamp,pGos_indexList->fileInfo.recordEndTimeStamp);
-	//printf("longName ================ %s\n",longName);
-#if CLOUD_STORAGE
 	sprintf(shortname,"%06d%s",pGos_indexList->fileInfo.fileIndex,"~1DAT");
 	start = pGos_indexList->startCluster;
 	CreateLongFileItem(&dir_entry,shortname,longName,start,FILE_MAX_LENTH,gHeadIndex.ClusterSize,0x20);
-#else
-	if(pGos_indexList->fileInfo.fileType == RECORD_FILE_MP4)
-	{
-		sprintf(shortname,"%06d%s",pGos_indexList->fileInfo.fileIndex,"~1MP4");
-		start = pGos_indexList->startCluster;
-		CreateLongFileItem(&dir_entry,shortname,longName,start,MP4_MAX_LENTH,gHeadIndex.ClusterSize,0x20);
-	}
-	else if(pGos_indexList->fileInfo.fileType == RECORD_FILE_JPG)
-	{
-		sprintf(shortname,"%06d%s",pGos_indexList->fileInfo.fileIndex,"~1JPG");
-		start = pGos_indexList->startCluster;
-		CreateLongFileItem(&dir_entry,shortname,longName,start,JPEG_MAX_LENTH,gHeadIndex.ClusterSize,0x20);
-	}
-	else
-	{
-		return -1;
-	}
-#endif
 	
 	dir_entry.dir_entry.time = pGos_indexList->fileInfo.recordStartTime;
 	dir_entry.dir_entry.date = pGos_indexList->fileInfo.recordStartDate;
@@ -2256,64 +2105,24 @@ int Storage_Read(char* Fileindex,int offset,void *data,int dataSize,int fpart)
 		return -1;
 	}
 
-#if CLOUD_STORAGE
 	if( NULL == gAVIndexList || Fileindex == NULL)
 	{
 		printf("error !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
 		return -1;
 	}
-#else
-	if(NULL == gMp4IndexList || NULL == gJpegIndexList)
-	{
-		return -1;
-	}
-#endif
+
 	struct GosIndex *pGos_indexList;
 	int lAviCount;
 	int IndexSum;
 	int datalen;
 	int retlen = 0;
 
-#if CLOUD_STORAGE
 	pGos_indexList = gAVIndexList;
 	IndexSum = gHeadIndex.lRootDirFileNum;
 	lAviCount = 0;
-#else
-	if(Fileindex < gHeadIndex.lRootDirFileNum)
-	{
-		pGos_indexList = gMp4IndexList;
-		IndexSum = gHeadIndex.lRootDirFileNum;
-		lAviCount = 0;
-	}
-	else
-	{
-		pGos_indexList = gJpegIndexList;
-		IndexSum = gHeadIndex.lJpegFileNum + gHeadIndex.lRootDirFileNum;
-		lAviCount = gHeadIndex.lRootDirFileNum;
-	}
-#endif
 	
-	/*for(lAviCount;lAviCount < IndexSum;lAviCount++)
-	{
-		if(pGos_indexList->fileInfo.fileIndex == Fileindex)
-		{
-			break;
-		}
-		pGos_indexList++;
-	}
-	if(lAviCount == IndexSum) //没有找到对应的扇区地址
-	{
-		return -1;
-	}*/
 	pGos_indexList = (GosIndex*)Fileindex;
 	//连续读
-	#if 0
-	if(pGos_indexList->fileInfo.FileFpart == 0)
-	{
-		pGos_indexList->DataSectorsEA = pGos_indexList->DataSectorsNum * DEFAULT_SECTOR_SIZE;
-	}
-	pGos_indexList->fileInfo.FileFpart = 1;
-	#endif
 	if(offset >= pGos_indexList->fileInfo.fileSize)
 	{
 		printf("offset >= pGos_indexList->fileInfo.fileSize##########\n");
@@ -2381,7 +2190,6 @@ int Storage_Write(char* Fileindex,const void *data,unsigned int dataSize,int fpa
 	
 	struct GosIndex *pGos_indexList;
 
-#if CLOUD_STORAGE
 	if(NULL == gAVIndexList || (!StorageCheckSDExist()))
 	{
 		printf("Storage_Write:line[%d] error gAVIndexList == NULL or sd remove\n",__LINE__);
@@ -2391,39 +2199,7 @@ int Storage_Write(char* Fileindex,const void *data,unsigned int dataSize,int fpa
 	IndexSum = gHeadIndex.lRootDirFileNum;
 	lAviCount = 0;
 	MaxFileSize = FILE_MAX_LENTH;
-#else
-	if(NULL == gMp4IndexList || NULL == gJpegIndexList || (!StorageCheckSDExist()))
-	{
-		return -1;
-	}
-	if(Fileindex < gHeadIndex.lRootDirFileNum)
-	{
-		pGos_indexList = gMp4IndexList;
-		IndexSum = gHeadIndex.lRootDirFileNum;
-		lAviCount = 0;
-		MaxFileSize = MP4_MAX_LENTH;
-	}
-	else
-	{
-		pGos_indexList = gJpegIndexList;
-		IndexSum = gHeadIndex.lJpegFileNum + gHeadIndex.lRootDirFileNum;
-		lAviCount = gHeadIndex.lRootDirFileNum;
-		MaxFileSize = MP4_MAX_LENTH;
-	}
-#endif
-	/*
-	for(lAviCount;lAviCount < IndexSum;lAviCount++)
-	{
-		if(pGos_indexList->fileInfo.fileIndex == Fileindex)
-		{
-			break;
-		}
-		pGos_indexList++;
-	}
-	if(lAviCount == IndexSum) //没有找到对应的扇区地址
-	{
-		return -1;
-	}*/
+
 	if(gAVIndexList == NULL)
 	{
 		printf("Storage_Write:line[%d] error gAVIndexList == NULL\n",__LINE__);
@@ -2505,41 +2281,19 @@ long long storage_Lseek(int Fileindex,unsigned int offset,unsigned int whence,in
 		return -1;
 	}
 
-#if CLOUD_STORAGE
 	if(NULL == gAVIndexList || (!StorageCheckSDExist()))
 	{
 		return -1;
 	}
-#else
-	if(NULL == gMp4IndexList || NULL == gJpegIndexList || (!StorageCheckSDExist()))
-	{
-		return -1;
-	}
-#endif
 	
 	int lAviCount;
 	int IndexSum;
 	unsigned long long DataEA;
 	struct GosIndex *pGos_indexList;
 
-#if CLOUD_STORAGE
 	pGos_indexList = gAVIndexList;
 	IndexSum = gHeadIndex.lRootDirFileNum;
 	lAviCount = 0;
-#else
-	if(Fileindex < gHeadIndex.lRootDirFileNum)
-	{
-		pGos_indexList = gMp4IndexList;
-		IndexSum = gHeadIndex.lRootDirFileNum;
-		lAviCount = 0;
-	}
-	else
-	{
-		pGos_indexList = gJpegIndexList;
-		IndexSum = gHeadIndex.lJpegFileNum + gHeadIndex.lRootDirFileNum;
-		lAviCount = gHeadIndex.lRootDirFileNum;
-	}
-#endif
 
 	for(lAviCount;lAviCount < IndexSum;lAviCount++)
 	{
@@ -2603,24 +2357,16 @@ char *sGetMonthEventList(char *sMonthEventList)
 	char sList[32] = {0};
 	struct GosIndex *pGos_indexList = NULL;
 
-#if CLOUD_STORAGE
 	if(NULL == gAVIndexList || NULL == sMonthEventList || (!StorageCheckSDExist()))
 	{
 		return NULL;
 	}
-#else
-	if(NULL == gMp4IndexList || NULL == gJpegIndexList || NULL == sMonthEventList || (!StorageCheckSDExist()))
-	{
-		return NULL;
-	}
-#endif
 	
 	DateList mDateList[DateListMax];
 	int mDateListCounts = 0;
 	memset(&mDateList,0,sizeof(DateList)*DateListMax);
 
 
-#if CLOUD_STORAGE
 	lAviCount = 1;
 	int i = 0;
 	pGos_indexList = &gAVIndexList[1];
@@ -2658,84 +2404,6 @@ char *sGetMonthEventList(char *sMonthEventList)
 		}	
 		pGos_indexList++;
 	}
-#else
-	//遍历mp4	
-	lAviCount = 1;
-	int i = 0;
-	pGos_indexList = &gMp4IndexList[1];
-	IndexSum = gHeadIndex.lRootDirFileNum;	
-
-	for(lAviCount;lAviCount < IndexSum;lAviCount++)
-	{
-		
-		if(pGos_indexList->fileInfo.filestate == NON_EMPTY_OK)
-		{
-
-			if(mDateListCounts == 0)
-			{
-				mDateList[mDateListCounts].mDate = pGos_indexList->fileInfo.recordStartDate;
-				mDateList[mDateListCounts].mCounts ++;
-				mDateListCounts ++;
-			}
-			else
-			{
-				for(i = 0;i < mDateListCounts;i++)
-				{
-					if(mDateList[i].mDate == pGos_indexList->fileInfo.recordStartDate)
-					{
-						mDateList[i].mCounts ++;
-						break;
-					}
-				}
-				if(i == mDateListCounts)
-				{
-					mDateList[i].mDate = pGos_indexList->fileInfo.recordStartDate;
-					mDateList[i].mCounts ++;
-					mDateListCounts ++;
-				}
-			}
-		}	
-		pGos_indexList++;
-	}
-
-	//遍历jpeg
-	pGos_indexList = &gJpegIndexList[0];
-	IndexSum = gHeadIndex.lJpegFileNum + gHeadIndex.lRootDirFileNum;
-	lAviCount = gHeadIndex.lRootDirFileNum;
-
-	for(lAviCount;lAviCount < IndexSum;lAviCount++)
-	{	
-		if(pGos_indexList->fileInfo.filestate == NON_EMPTY_OK)
-		{
-
-			if(mDateListCounts == 0)
-			{
-				mDateList[mDateListCounts].mDate = pGos_indexList->fileInfo.recordStartDate;
-				mDateList[mDateListCounts].mCounts ++;
-				mDateListCounts ++;
-			}
-			else
-			{
-				for(i = 0;i < mDateListCounts;i++)
-				{
-					if(mDateList[i].mDate == pGos_indexList->fileInfo.recordStartDate)
-					{
-						mDateList[i].mCounts ++;
-						break;
-					}
-				}
-				if(i == mDateListCounts)
-				{
-					mDateList[i].mDate = pGos_indexList->fileInfo.recordStartDate;
-					mDateList[i].mCounts ++;
-					mDateListCounts ++;
-				}
-			}
-		
-		}	
-		pGos_indexList++;
-	}
-#endif
 
 	for(lAviCount = 0;lAviCount < mDateListCounts;lAviCount++)
 	{
@@ -2754,17 +2422,10 @@ char *sGetMonthEventList(char *sMonthEventList)
 //获取某天录像事件列表
 char *sGetDayEventList(const char *date, unsigned int file_type, char *sDayEventList, int NMaxLength, unsigned int *filecounts)
 {
-#if CLOUD_STORAGE
 	if(NULL == date || NULL == gAVIndexList || (!StorageCheckSDExist()))
 	{
 		return NULL;
 	}
-#else
-    if(NULL == date || NULL == gMp4IndexList || NULL == gJpegIndexList || (!StorageCheckSDExist()))
-    {
-        return NULL;
-    }
-#endif
 	
 	int lAviCount;
 	int IndexSum;
@@ -2782,14 +2443,10 @@ char *sGetDayEventList(const char *date, unsigned int file_type, char *sDayEvent
 	recordDate = (tm_year - 1980) * 512 + tm_mon * 32 + tm_mday; 
 
 	//请求文件类型 (视频: 0 , 图片: 1)
-#if CLOUD_STORAGE
 	pGos_indexList = gAVIndexList; 
 	IndexSum = gHeadIndex.lRootDirFileNum;	
 	lAviCount = 0;	
 	FileType = RECORD_FILE_H264; 
-#else
-	GetListInit();
-#endif
 
 	int i = 0;
 	int *pList = (int *)malloc(10240*sizeof(int));
@@ -2813,14 +2470,11 @@ char *sGetDayEventList(const char *date, unsigned int file_type, char *sDayEvent
 	ptmp = &pList[0];
 	for(i = 0; i< counts; i++)
 	{
-	#if CLOUD_STORAGE
 		pGos_indexList = gAVIndexList; 
 		IndexSum = gHeadIndex.lRootDirFileNum;	
 		lAviCount = 0;	
 		FileType = RECORD_FILE_H264; 
-	#else
-		GetListInit();
-	#endif
+
 		for(lAviCount;lAviCount < IndexSum;lAviCount++)
 		{
 			if(pGos_indexList->fileInfo.recordStartTime == *ptmp)
@@ -2836,18 +2490,6 @@ char *sGetDayEventList(const char *date, unsigned int file_type, char *sDayEvent
 
 				fileSize = (float)pGos_indexList->fileInfo.fileSize;
 
-			#if !CLOUD_STORAGE
-				if(pGos_indexList->fileInfo.fileType == RECORD_FILE_MP4)
-				{
-					sprintf(Item,"%s@%6.2f|",FileName,fileSize/(float)(1024*1024));
-				}
-				else if(pGos_indexList->fileInfo.fileType == RECORD_FILE_JPG)
-				{
-					sprintf(Item,"%s@%6.1f|",FileName,fileSize/(float)1024);
-				}
-			#else
-				sprintf(Item,"%s@%6.2f|",FileName,fileSize/(float)(1024*1024));
-			#endif
 				strncat(sDayEventList,Item,strlen(Item));
 				break;
 			}
@@ -2892,50 +2534,22 @@ int sGetDayAssignTimeEventList(const char *filename, char *sDayEventList,int dir
 	int rltCount = 0;
 	unsigned int file_type;
 	
-#if CLOUD_STORAGE
 	if(NULL == filename ||gAVIndexList == NULL || (!StorageCheckSDExist()))
 	{
         return 0;
 	}
 	sscanf(filename,"%04d%02d%02d%02d%02d%02d%c%c%s",&tm_year,&tm_mon,&tm_mday,&tm_hour,
 		&tm_min,&tm_sec,&zero,/*&recordtype,*/&alarmtype,/*&fileduration,*/filetype);
-#else
-    if(NULL == filename || NULL == gMp4IndexList || NULL == gJpegIndexList || (!StorageCheckSDExist()))
-    {
-        return 0;
-    }
-	
-	sscanf(filename,"%04d%02d%02d%02d%02d%02d%c%c%s",&tm_year,&tm_mon,&tm_mday,&tm_hour,
-		&tm_min,&tm_sec,&zero,/*&recordtype,*/&alarmtype,/*&fileduration,*/filetype);
-#endif
 
 	recordDate = (tm_year - 1980) * 512 + tm_mon * 32 + tm_mday; 
 	int ltime = tm_hour * 2048 + tm_min * 32 + tm_sec / 2;
 
-#if CLOUD_STORAGE
 	file_type = 0;
 	
 	pGos_indexList = gAVIndexList; 
 	IndexSum = gHeadIndex.lRootDirFileNum;	
 	lAviCount = 0;	
 	FileType = RECORD_FILE_H264; 
-#else
-	//请求文件类型 (视频: 0 , 图片: 1)
-	if(strncmp(filetype,pFileTypeString[RECORD_FILE_MP4],strlen(filetype))==0)
-	{
-		file_type = 0;
-	}
-	else if(strncmp(filetype,pFileTypeString[RECORD_FILE_JPG],strlen(filetype))==0)
-	{
-		file_type = 1;
-	}
-	else
-	{
-		return 0;
-	}
-	
-	GetListInit();
-#endif
 	
 	int i = 0;
 	int *pList = (int *)malloc(10240*sizeof(int));
@@ -3047,14 +2661,11 @@ int sGetDayAssignTimeEventList(const char *filename, char *sDayEventList,int dir
 	ptmp = &pDirectionList[0];
 	for(i = 0; i< rltCount; i++)
 	{
-	#if CLOUD_STORAGE
 		pGos_indexList = gAVIndexList; 
 		IndexSum = gHeadIndex.lRootDirFileNum;	
 		lAviCount = 0;	
 		FileType = RECORD_FILE_H264; 
-	#else
-		GetListInit();
-	#endif
+
 		for(lAviCount;lAviCount < IndexSum;lAviCount++)
 		{
 			if(pGos_indexList->fileInfo.recordStartTime == *ptmp)
@@ -3070,18 +2681,7 @@ int sGetDayAssignTimeEventList(const char *filename, char *sDayEventList,int dir
 
 				fileSize = (float)pGos_indexList->fileInfo.fileSize;
 
-#if !CLOUD_STORAGE
-				if(pGos_indexList->fileInfo.fileType == RECORD_FILE_MP4)
-				{
-					sprintf(Item,"%s@%6.2f|",FileName,fileSize/(float)(1024*1024));
-				}
-				else if(pGos_indexList->fileInfo.fileType == RECORD_FILE_JPG)
-				{
-					sprintf(Item,"%s@%6.1f|",FileName,fileSize/(float)1024);
-				}
-#else
 				sprintf(Item,"%s@%6.1f|",FileName,fileSize/(float)(1024*1024));
-#endif
 				strncat(sDayEventList,Item,strlen(Item));
 				break;
 			}
@@ -3291,23 +2891,16 @@ unsigned int GetDiskInfo_Usable()
 	{
 		return 0;
 	}
-#if CLOUD_STORAGE
 	if(NULL == gAVIndexList || (!StorageCheckSDExist()))
 	{
 		return 0;
 	}
-#else
-	if(NULL == gMp4IndexList || NULL == gJpegIndexList || (!StorageCheckSDExist()))
-	{
-		return 0;
-	}
-#endif
+
 	int IndexSum;
 	int RootDirFileUseCounts = 0;
 	int JpegFileUseCounts = 0;
 	struct GosIndex *pGos_indexList;
 
-#if CLOUD_STORAGE
 	int lAviCount = 1;
 	pGos_indexList = gAVIndexList;
 	for(lAviCount;lAviCount < gHeadIndex.lRootDirFileNum;lAviCount++)
@@ -3327,54 +2920,7 @@ unsigned int GetDiskInfo_Usable()
 	}
 	
 	unsigned int Usable = (gHeadIndex.lRootDirFileNum - RootDirFileUseCounts - 1) * UsableRootM;
-#else
-	int lAviCount = 1;
-	pGos_indexList = gMp4IndexList;
-	for(lAviCount;lAviCount < gHeadIndex.lRootDirFileNum;lAviCount++)
-	{
-		if(pGos_indexList->fileInfo.filestate == NON_EMPTY_OK)
-		{
-			RootDirFileUseCounts++;
-		}
-		pGos_indexList++;
-	}
-	
-	lAviCount = gHeadIndex.lRootDirFileNum;
-	pGos_indexList = gJpegIndexList;
-	for(lAviCount;lAviCount < gHeadIndex.lRootDirFileNum + gHeadIndex.lJpegFileNum;lAviCount++)
-	{
-		if(pGos_indexList->fileInfo.filestate == NON_EMPTY_OK)
-		{
-			JpegFileUseCounts++;
-		}
-		pGos_indexList++;
-	}	
-	pGos_indexList = NULL;
-	
-	unsigned int UsableRootM = MP4_MAX_LENTH / (1024*1024);
 
-	if(MP4_MAX_LENTH % (1024*1024) != 0)
-	{
-		UsableRootM += 1;
-	}
-
-	unsigned int UsableJpegM = JPEG_MAX_LENTH / 1024;
-
-	if(JPEG_MAX_LENTH % 1024 != 0)
-	{
-		UsableJpegM += 1;
-	}
-
-	UsableJpegM = (gHeadIndex.lJpegFileNum - JpegFileUseCounts) * UsableJpegM / 1024;
-		
-	if((gHeadIndex.lJpegFileNum - JpegFileUseCounts) * UsableJpegM % 1024 != 0)
-	{
-		UsableJpegM += 1;
-	}
-	unsigned int Usable = (gHeadIndex.lRootDirFileNum - RootDirFileUseCounts - 1) * UsableRootM \
-		+ UsableJpegM;
-	
-#endif
 	return Usable;  //M
 }
 

@@ -146,7 +146,6 @@ typedef struct msdos_boot_sector//512个字节
 } msdos_boot_sector;
 
 //////////////////////////////////////////////////////////////////////////////////
-#define CLOUD_STORAGE		   1   //云存储模式
 
 #define LONG_MSDOS_DIR_SUPPORT 1   //支持长文件名
 
@@ -168,14 +167,8 @@ extern "C"{
 #define MP4_MAX_LENTH     		(8*1024*1024)   	//MP4每个文件最大占8M
 #define JPEG_MAX_LENTH     		(384*1024)        	//jpeg每个文件最大占384k
 
-#if CLOUD_STORAGE
 #define FLAG_INDEX_HEAD    		0XAAF0F0AB     		//索引头标志,读不到这个标志代表没有索引，开始预分配
 #define MAX_INTERVAL_TIME 		1					//两个文件时间相差在1s内，则认为这两个文件连续
-#else
-#define FLAG_INDEX_HEAD    		0XAAF0F0AA     		//索引头标志,读不到这个标志代表没有索引，开始预分配
-#endif
-//#define PIC_PARTITION_SIZE    50000         	    //图片资源占用的分区大小(以簇为单位)
-//#define DATE_LIST_MAX           2000 				//2000天的List事件列表长度
 #define DateListMax             100
 //索引的内容(index)
 //--------------------------------------------
@@ -238,7 +231,6 @@ enum ALARM_TYPE
 };
 
 //文件信息
-#if CLOUD_STORAGE
 typedef struct FileInfo
 {	
 	__u16 fileIndex;						//文件句柄(索引号)
@@ -254,23 +246,6 @@ typedef struct FileInfo
 	__u32 recordEndTimeStamp;				//录像结束时间戳
 	LONG  fileSize;                 		//文件长度
 }FileInfo;
-#else
-typedef struct FileInfo
-{	
-	__u32 fileIndex;						//文件句柄(索引号)
-	__u32 FileFpart;						//文件预留标志
-	__u32 recordDuration;    				//录像时长(单位:秒)
-	enum RECORD_FILE_STATE filestate;		//文件状态	
-	enum RECORD_TYPE recordType;			//录像类型(计划录像，手动录像，事件录像)
-	enum ALARM_TYPE  alarmType;             //报警类型	
-	enum RECORD_FILE_TYPE fileType;         //文件类型
-	__u16 recordStartDate;                  //录像开始日期
-	__u16 recordStartTime;                  //录像开始时间
-	__u32 recordStartTimeStamp;				//录像开始时间戳
-	__u32 recordEndTimeStamp;				//录像结束时间戳
-	LONG  fileSize;                 		//文件长度
-}FileInfo;
-#endif
 /*	
 	日期=(年份-1980)*512+月份*32+日  (2个字节)
 	0x18字节0~4位是日期数；0x18字节5~7位和0x19字节0位是月份；0x19字节的1~7位为年号
