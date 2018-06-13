@@ -48,6 +48,37 @@
 #include "lock_utils.h"
 #include "utils_log.h"
 
+//pre-define
+inline void Mark_FAT_Cluster (unsigned long cluster, unsigned long value, unsigned char* pFat);
+unsigned char ChkSum (unsigned char *pFcbName);
+void creatItem(char longNum,char *pFileName,char *de,unsigned char Chk);
+void CreateFileItem(msdos_dir_entry *de,char *pFileName,
+                unsigned long start, unsigned long filesize,
+				unsigned char nClusterSize,char attribute);
+void CreateLongFileItem(long_msdos_dir_entry *de,unsigned char *shortname,
+						char *pFileName,unsigned long start,
+						unsigned long filesize,unsigned char nClusterSize,
+						char attribute);
+int   FormatjpegDir(int fpart);
+int   FormatParttion(int fpart, unsigned long filesize, unsigned long lAviNum,unsigned long eventlogSizeM);
+int   Find_head_index(int fpart);
+GosIndex* Get_Oldest_file();
+GosIndex* Get_Oldest_Alarm_file();
+GosIndex* Get_Index_Form_fd(unsigned int fd);
+
+int   Storage_Write_gos_index(int fpart,enum RECORD_FILE_TYPE fileType);
+int   Storage_Get_File_Size(const char *fileName);
+int   StorageDeleteFile(int Fileindex);
+
+int   Storage_Init(int mkfs_vfat);
+int   Storage_Close_All();
+char* Storage_Open(const char *fileName);
+int   Storage_Close(char* Fileindex, char *fileName,int fpart);
+int   Storage_Read(char* Fileindex,int offset,void *data,int dataSize,int fpart);
+int   Storage_Write(char* Fileindex,const void *data,unsigned int dataSize,int fpart);
+long long Storage_Lseek(int Fileindex,unsigned int offset,unsigned int whence,int fpart);
+//////////////////////////////////////////////////////////////////
+
 #ifdef __cplusplus
 extern "C"{
 #endif
@@ -148,10 +179,6 @@ void CreateFileItem(msdos_dir_entry *de,char *pFileName,
 	de->start = CT_LE_W(start&0xffff);
 	de->size = filesize;
 	de->lcase = 0x18;	//mine 
-
-	//start+=filesize/(nClusterSize*DEFAULT_SECTOR_SIZE);
-	//if((filesize % (nClusterSize*DEFAULT_SECTOR_SIZE)) != 0)
-	//	start+=1;
 }
 
 void CreateLongFileItem(long_msdos_dir_entry *de,unsigned char *shortname,
@@ -163,14 +190,9 @@ void CreateLongFileItem(long_msdos_dir_entry *de,unsigned char *shortname,
 	//长目录每项最多携带13个字符
 	long_msdos_dir_entry *de_msdos = de;
 	memset(de_msdos,0,sizeof(long_msdos_dir_entry));
-	
-	//char *ptem = de->long_msdos_dir[1];
-	//char *pname = pFileName;
-	//char shortname[11] = "000001~1MP4";
     unsigned char Chk = ChkSum(shortname);
-	//长目录每项最多携带13个字符
 
-	//char *pFileName = "longname12345678901234567890.txt";
+	//长目录每项最多携带13个字符
 	creatItem(0x42,pFileName+13,de_msdos->long_msdos_dir[0],Chk);
 	creatItem(0x01,pFileName,de_msdos->long_msdos_dir[1],Chk);
 	
@@ -178,6 +200,7 @@ void CreateLongFileItem(long_msdos_dir_entry *de,unsigned char *shortname,
 	#endif
 	
 }
+
 
 //自定义文件锁
 void Storage_Lock()
@@ -399,13 +422,8 @@ int FormatParttion(int fpart, unsigned long filesize, unsigned long lAviNum,unsi
 			cblocks = ( b >> 9 );	//总共扇区数
 
 		printf("cblocks..000...111==%llu\n",cblocks);	
-#if 1
 		//减去 10M 的空间不分区
 		cblocks -= 10*1024*2; // 1kB = 2个扇区 得到所有需要分区的扇区
-#else
-		cblocks = cblocks*9;
-		cblocks = cblocks/10;
-#endif
 	}
 
 	printf("cblocks..222!\n");	
@@ -609,27 +627,6 @@ int FormatParttion(int fpart, unsigned long filesize, unsigned long lAviNum,unsi
 	}
 	memset(pRootDir, 0, lRootFileSize);
 
-	//下面是写根目录文件
-	#if 0
-	//根目录的第0文件为：卷标
-	////初始化第0个目录项(32个字节)//////////
-	struct msdos_dir_entry *de = &pRootDir[0];  
-	memcpy(de->name, "GOSCAM_WUSM", 11);
-	de->attr = ATTR_VOLUME;//mine
-	struct tm* ctime = localtime(&CreateTime);
-	de->time = CT_LE_W( (unsigned short)((ctime->tm_sec >> 1) +
-		                	(ctime->tm_min << 5) + (ctime->tm_hour << 11)));
-	de->date = CT_LE_W( (unsigned short)(ctime->tm_mday +
-				               ((ctime->tm_mon+1) << 5) +
-				               ((ctime->tm_year-80) << 9)) );
-	de->ctime_ms = 0;
-	de->ctime = de->time;
-	de->cdate = de->date;
-	de->adate = de->date;
-	de->starthi = CT_LE_W(0);
-	de->start = CT_LE_W(0);
-	de->size = CT_LE_L(0);
-    #endif
 	//分区上要有几个特定的文件
 	unsigned long lStartClu = lClustersofRoot + 2;//数据区从二开始编簇号,数据区先放根目录，然后才放其它文件（在mbr中已经规定好了）
 
@@ -640,7 +637,6 @@ int FormatParttion(int fpart, unsigned long filesize, unsigned long lAviNum,unsi
 	sprintf(longName,"%s","GosStorageManagerIndex.dat");
 	
 	CreateLongFileItem(&pRootDir[0],shortname,longName,lStartClu,10*1024*1024,mbs.cluster_size,0x20);
-	//CreateLongFileItem(&pRootDir[2],shortname,longName,lStartClu,10*1024*1024,mbs.cluster_size,0x20);
 
    	//有实际簇的个数得到的视频文件数
    	lClust32 -= (10*1024*1024)/(mbs.cluster_size * DEFAULT_SECTOR_SIZE);  //去掉10M的空间不分配
@@ -656,14 +652,6 @@ int FormatParttion(int fpart, unsigned long filesize, unsigned long lAviNum,unsi
 	gHeadIndex.ClusterSize = mbs.cluster_size;
 	gHeadIndex.HeadStartSector = lClustersofRoot*gHeadIndex.ClusterSize+gHeadIndex.RootStartSector;
 	
-	//添加根目录项的"."和".."
-	//char pname[11] = {0};
-	//sprintf(pname,"%c%c%c%c%c%c%c%c%c%c%c",46,32,32,32,32,32,32,32,32,32,32);
-	//CreateFileItem(&pRootDir[0],pname,0,0,gHeadIndex.ClusterSize,0x10);
-	//memset(pname,0,sizeof(pname));
-	//sprintf(pname,"%c%c%c%c%c%c%c%c%c%c%c",46,46,32,32,32,32,32,32,32,32,32);
-	//CreateFileItem(&pRootDir[1],pname,0,0,gHeadIndex.ClusterSize,0x10);
-
 	unsigned long all_gos_indexSize = sizeof(GosIndex)*gHeadIndex.lRootDirFileNum;
 	struct GosIndex* pGos_index = NULL; 
 	if ((pGos_index = (struct GosIndex *)malloc (all_gos_indexSize)) == NULL)
@@ -1249,7 +1237,6 @@ int Storage_Get_File_Size(const char *fileName)
 	{
 		return -1;
 	}
-	//printf("%d %d %d %d %d %d\n",tm_year,tm_mon,tm_mday,tm_hour,tm_min,tm_sec);
 	unsigned int Checktime = tm_hour * 2048 + tm_min * 32 + tm_sec / 2;
 	unsigned int Checkdate = (tm_year - 1980) * 512 + tm_mon * 32 + tm_mday; 
 
@@ -1261,18 +1248,16 @@ int Storage_Get_File_Size(const char *fileName)
 			if(pGos_indexList->fileInfo.recordStartDate == (Checkdate&0xffff)
 			   && pGos_indexList->fileInfo.recordStartTime == (Checktime&0xffff))
 			{
-				//printf("get 111111111111111111111111\n");
 				return pGos_indexList->fileInfo.fileSize;
 			}
 		}
 		pGos_indexList++;
 	}
-	//printf("2222222222222222222222\n");
 	return 0;
 }
 
 //删除文件
-int DelectStorageFile(int Fileindex)
+int StorageDeleteFile(int Fileindex)
 {
 	int lAviCount;
 	int IndexSum;
@@ -1492,11 +1477,6 @@ int Storage_Init(int mkfs_vfat)
 		}
 	}
 	
-	//if(i>4)
-	//{
-	//	return -1;
-	//}
-
 	//yym add
 	if(fPart < 0 )
 	{
@@ -1578,7 +1558,7 @@ int Storage_Close_All()
 }
 
 //寻找可写文件的索引号(文件句柄)
-char* storage_Open(const char *fileName)
+char* Storage_Open(const char *fileName)
 {
 	if(RemoveSdFlag == 1)
 	{
@@ -1631,155 +1611,12 @@ char* storage_Open(const char *fileName)
 	pGos_indexList->fileInfo.recordStartTime = ltime & 0xffff;
 	pGos_indexList->fileInfo.recordStartDate = ldate & 0xffff;
 	pGos_indexList->fileInfo.filestate = OCCUPATION;
+	pGos_indexList->fileInfo.FileFpart = 0;
+	pGos_indexList->DataSectorsEA = 0;
 	oldStartTimeStap = pGos_indexList->fileInfo.recordStartTimeStamp;
 	oldEndTimeStap   = pGos_indexList->fileInfo.recordEndTimeStamp;
 	printf("\n>>>>>>>>>>>>open DiskFd=%d\n",pGos_indexList->fileInfo.fileIndex);
 	return (char*)pGos_indexList;
-#if 0
-#if 0
-	unsigned int Checktime = tm_hour * 2048 + tm_min * 32 + tm_sec / 2;
-	unsigned int Checkdate = (tm_year - 1980) * 512 + tm_mon * 32 + tm_mday; 
-
-	//先查找文件是否存在，存在则返回该文件描述符，不存在则返回未使用的描述符
-	for(lAviCount;lAviCount < IndexSum;lAviCount++)
-	{
-		if(pGos_indexList->fileInfo.filestate == NON_EMPTY_OK)
-		{
-			if(pGos_indexList->fileInfo.recordStartDate == (Checkdate&0xffff)
-			   && pGos_indexList->fileInfo.recordStartTime == (Checktime&0xffff))
-			{
-				return (char*)pGos_indexList;
-			}
-		}
-		pGos_indexList++;
-	}
-#endif
-	if(NULL == gAVIndexList)
-		return NULL;
-
-	WitchList();
-	for(lAviCount;lAviCount < IndexSum;lAviCount++)
-	{
-		if(NULL == gAVIndexList)
-			return NULL;
-		
-		if(pGos_indexList->fileInfo.fileIndex == 0)
-		{
-			printf("pGos_indexList->fileInfo.fileIndex ===== 0 !!!!!!!!!!!!!!!!!\n");
-			continue;
-		}
-		
-		if(pGos_indexList->fileInfo.filestate == WRITE_OK)
-		{
-			//文件信息
-			//pGos_indexList->fileInfo.recordDuration = fileduration;
-			pGos_indexList->fileInfo.alarmType = alarmtype - 'a';
-			//pGos_indexList->fileInfo.fileType = FileType;
-			//pGos_indexList->fileInfo.recordType = recordtype - 'a';
-			//文件的创建时间 
-			
-			unsigned int ltime = tm_hour * 2048 + tm_min * 32 + tm_sec/2;
-			unsigned int ldate = (tm_year - 1980) * 512 + tm_mon * 32 + tm_mday; 
-			pGos_indexList->fileInfo.recordStartTime = ltime & 0xffff;
-			pGos_indexList->fileInfo.recordStartDate = ldate & 0xffff;
-			pGos_indexList->fileInfo.recordStartTimeStamp = GetTimeStamp(fileName);
-			printf("fd = %d , recordStartTimeStamp = %d\n",pGos_indexList->fileInfo.fileIndex,pGos_indexList->fileInfo.recordStartTimeStamp);
-			pGos_indexList->fileInfo.filestate = OCCUPATION;
-			printf("\n>>>>>>>>>>>>open DiskFd=%d\n",pGos_indexList->fileInfo.fileIndex);
-			return (char*)pGos_indexList;
-		}
-		pGos_indexList++;
-	}
-	
-	if(NULL == gAVIndexList)
-		return NULL;
-
-	//当所有的句柄都被使用的时候，则需要找个最老的文件句柄拿出来使用(循环录像)
-	#if 1
-	pGos_indexList = Get_Oldest_file();
-
-	if(pGos_indexList != NULL)
-	{
-		//文件信息
-		pGos_indexList->fileInfo.alarmType = alarmtype - 'a';
-		
-		//文件的创建时间 
-		int ltime = tm_hour * 2048 + tm_min * 32 + tm_sec / 2;
-		int ldate = (tm_year - 1980) * 512 + tm_mon * 32 + tm_mday; 
-		pGos_indexList->fileInfo.recordStartTime = ltime&0xffff;
-		pGos_indexList->fileInfo.recordStartDate = ldate&0xffff;
-		pGos_indexList->fileInfo.recordStartTimeStamp = GetTimeStamp(fileName);
-		printf("recordStartTimeStamp = %d\n",pGos_indexList->fileInfo.recordStartTimeStamp);
-		pGos_indexList->fileInfo.filestate = OCCUPATION;
-		printf("\n>>>>>>>>>>>>open DiskFd=%d\n",pGos_indexList->fileInfo.fileIndex);
-		return (char*)pGos_indexList;
-	}
-	#else
-	WitchList();
-	
-	int counts;
-	unsigned short int adate = 0xFFFF;
-	unsigned short int atime = 0xFFFF;
-	//先找到一个最小的日期，在找该日期的最小的时间
-	for(lAviCount;lAviCount < IndexSum;lAviCount++)
-	{
-		if(NULL == gAVIndexList)
-			return NULL;
-		if(pGos_indexList->fileInfo.recordStartDate < adate)
-		{
-			adate = pGos_indexList->fileInfo.recordStartDate;
-		}
-		pGos_indexList++;
-	}
-	
-	if(NULL == gAVIndexList)
-		return NULL;
-	
-	WitchList();
-	for(lAviCount;lAviCount < IndexSum;lAviCount++)
-	{
-		if(NULL == gAVIndexList)
-			return NULL;
-		
-		if(pGos_indexList->fileInfo.recordStartDate == adate
-			&&pGos_indexList->fileInfo.recordStartTime < atime)
-		{
-
-			atime = pGos_indexList->fileInfo.recordStartTime;
-		}
-		pGos_indexList++;
-	}
-	
-	WitchList();
-	for(lAviCount;lAviCount < IndexSum;lAviCount++)
-	{
-		if(NULL == gAVIndexList)
-			return NULL;
-		if(pGos_indexList->fileInfo.recordStartDate == adate
-			&& pGos_indexList->fileInfo.recordStartTime == atime)
-		{
-			//文件信息
-			//pGos_indexList->fileInfo.recordDuration = fileduration;
-			pGos_indexList->fileInfo.alarmType = alarmtype - 'a';
-			//pGos_indexList->fileInfo.fileType = FileType;
-			//pGos_indexList->fileInfo.recordType = recordtype - 'a';
-			
-			//文件的创建时间 
-			int ltime = tm_hour * 2048 + tm_min * 32 + tm_sec / 2;
-			int ldate = (tm_year - 1980) * 512 + tm_mon * 32 + tm_mday; 
-			pGos_indexList->fileInfo.recordStartTime = ltime&0xffff;
-			pGos_indexList->fileInfo.recordStartDate = ldate&0xffff;
-			pGos_indexList->fileInfo.recordStartTimeStamp = GetTimeStamp(fileName);
-			printf("recordStartTimeStamp = %d\n",pGos_indexList->fileInfo.recordStartTimeStamp);
-			pGos_indexList->fileInfo.filestate = OCCUPATION;
-			printf("\n>>>>>>>>>>>>open DiskFd=%d\n",pGos_indexList->fileInfo.fileIndex);
-			return (char*)pGos_indexList;
-		}
-		pGos_indexList++;
-	}
-	#endif
-	return NULL;
-	#endif
 }
 
 //更新fat表,目录以及索引
@@ -1901,68 +1738,6 @@ int Storage_Close(char* Fileindex,char *fileName,int fpart)
 	char longName[25] = {0};
 	char shortname[11] = {0};
 	unsigned long start;
-	
-	#if 0
-	tm_hour = (pGos_indexList->fileInfo.recordStartTime >> 11) & 0x1F;
-	tm_min  = (pGos_indexList->fileInfo.recordStartTime >> 5) & 0x3F;
-	tm_sec  = pGos_indexList->fileInfo.recordStartTime & 0x1F;
-
-	tm_year = (pGos_indexList->fileInfo.recordStartDate >> 9) & 0x7F;
-	tm_mon  = (pGos_indexList->fileInfo.recordStartDate >> 5) & 0x0F;
-	tm_mday  = pGos_indexList->fileInfo.recordStartDate & 0x1F;	
-
-	//预防时间解析不对,用当前的系统时间
-	struct tm *p;
-	time_t timep;
-	
-	tzset();
-	time(&timep);
-	p = localtime(&timep);
-	unsigned int Y,M,D,T,F,S = 0;
-
-	Y 	= 1900+p->tm_year;
-	M	= 1+p->tm_mon;
-	D	= p->tm_mday;
-	T	= p->tm_hour;
-	F	= p->tm_min;
-	S	= p->tm_sec;
-	//时间不对,打补丁
-	if((tm_year+1980) != Y || tm_mon != M || tm_mday != D)
-	{
-		return -1;
-		
-		unsigned int ltime = T * 2048 + F * 32 + S/2;
-		unsigned int ldate = (Y - 1980) * 512 + M * 32 + D; 
-		
-		pGos_indexList->fileInfo.recordStartTime = ltime & 0xffff;
-		pGos_indexList->fileInfo.recordStartDate = ldate & 0xffff;
-
-		tm_hour = (pGos_indexList->fileInfo.recordStartTime >> 11) & 0x1F;
-		tm_min  = (pGos_indexList->fileInfo.recordStartTime >> 5) & 0x3F;
-		tm_sec  = pGos_indexList->fileInfo.recordStartTime & 0x1F;
-
-		tm_year = (pGos_indexList->fileInfo.recordStartDate >> 9) & 0x7F;
-		tm_mon  = (pGos_indexList->fileInfo.recordStartDate >> 5) & 0x0F;
-		tm_mday  = pGos_indexList->fileInfo.recordStartDate & 0x1F;	
-
-		sprintf(longName,"%04d%02d%02d%02d%02d%02d0%c%c%04d%s",(tm_year+1980),tm_mon,tm_mday,
-		tm_hour,tm_min,2*tm_sec,pGos_indexList->fileInfo.recordType+'a',
-		pGos_indexList->fileInfo.alarmType+'a',
-		pGos_indexList->fileInfo.recordDuration,pFileTypeString[FileType]);
-	}
-	else
-	{
-		struct tm *ptime;
-		time_t tsm;
-		tsm = pGos_indexList->fileInfo.recordStartTimeStamp;
-		ptime = gmtime(&tsm);
-		
-		sprintf(longName,"%04d%02d%02d%02d%02d%02d0%c%c%04d%s",(ptime->tm_year+1900),ptime->tm_mon+1,ptime->tm_mday,
-		tm_hour,ptime->tm_min,ptime->tm_sec,pGos_indexList->fileInfo.recordType+'a',
-		pGos_indexList->fileInfo.alarmType+'a',
-		pGos_indexList->fileInfo.recordDuration,pFileTypeString[FileType]);
-	}
-	#endif
 
 	if(fileName != NULL)
 	{
@@ -2006,91 +1781,7 @@ int Storage_Close(char* Fileindex,char *fileName,int fpart)
 	//更新索引
 	pGos_indexList->fileInfo.filestate = NON_EMPTY_OK;
 	gHeadIndex.CurrIndexPos = pGos_indexList->fileInfo.fileIndex;
-#if 0
-	if(gHeadIndex.mDateListCounts == 0)
-	{
-		gHeadIndex.mDateList[gHeadIndex.mDateListCounts].mDate 
-			= pGos_indexList->fileInfo.recordStartDate;
-		gHeadIndex.mDateList[gHeadIndex.mDateListCounts].mCounts ++;
-		gHeadIndex.mDateListCounts ++;
-	}
-	else
-	{
-		for(lAviCount = 0;lAviCount < gHeadIndex.mDateListCounts;lAviCount++)
-		{
-			if(gHeadIndex.mDateList[lAviCount].mDate == pGos_indexList->fileInfo.recordStartDate)
-			{
-				gHeadIndex.mDateList[lAviCount].mCounts ++;
-				break;
-			}
-		}
-		if(lAviCount == gHeadIndex.mDateListCounts)
-		{
-			gHeadIndex.mDateList[gHeadIndex.mDateListCounts].mDate 
-				= pGos_indexList->fileInfo.recordStartDate;
-			gHeadIndex.mDateList[gHeadIndex.mDateListCounts].mCounts ++;
-			gHeadIndex.mDateListCounts ++;
-		}
-	}
-	
 
-	struct DateList *pDateList = gDateList;
-	if(gHeadIndex.DateListCount == 0)
-	{
-		pDateList->mDate = pGos_indexList->fileInfo.recordStartDate;
-		pDateList->mCounts ++;
-		gHeadIndex.DateListCount++;
-	}
-	else
-	{
-		for(lAviCount = 0;lAviCount < gHeadIndex.DateListCount;lAviCount++)
-		{
-			if(pDateList->mDate == pGos_indexList->fileInfo.recordStartDate)
-			{
-				pDateList->mCounts ++;
-				break;
-			}
-			pDateList++;
-		}
-		if(lAviCount == gHeadIndex.DateListCount)
-		{
-			pDateList->mDate = pGos_indexList->fileInfo.recordStartDate;
-			pDateList->mCounts ++;
-			gHeadIndex.DateListCount++;	
-		}
-	}
-	//循环录像时必须将之前的那天总数减一,新的日期加一
-	int i;
-	unsigned short int oldDate = 0;
-	if(FileType == RECORD_FILE_MP4 && gMp4OldDate)
-	{
-		oldDate = gMp4OldDate;
-	}
-	else if(FileType == RECORD_FILE_JPG && gJpegOldDate)
-	{
-		oldDate = gJpegOldDate;
-	}
-
-	if(oldDate)
-	{
-		struct DateList *pDateList = gDateList;
-		for(i = 0;i < gHeadIndex.DateListCount;i++)
-		{
-			if(pDateList->mDate == oldDate) 
-			{
-				pDateList->mCounts--;
-				if(pDateList->mCounts < 1)
-				{
-					pDateList->mCounts = gDateList[gHeadIndex.DateListCount-1].mCounts;
-					pDateList->mDate = gDateList[gHeadIndex.DateListCount-1].mDate;
-					gHeadIndex.DateListCount--;
-				}
-				break;
-			}
-			pDateList++;
-		}
-	}
-#endif 
 	Storage_Write_gos_index(fpart,FileType);
 	sync();
 	
@@ -2242,7 +1933,7 @@ int Storage_Write(char* Fileindex,const void *data,unsigned int dataSize,int fpa
 		return -1;
 	}
 
-	if(nlen < 0)
+	if(nlen < 0 || nlen != dataSize)
 	{
 		printf("Storage_Write:line[%d] error nlen = %d\n",__LINE__,nlen);
 		return nlen;
@@ -2274,7 +1965,7 @@ int Storage_Write(char* Fileindex,const void *data,unsigned int dataSize,int fpa
 	return nlen;
 }
 
-long long storage_Lseek(int Fileindex,unsigned int offset,unsigned int whence,int fpart)
+long long Storage_Lseek(int Fileindex,unsigned int offset,unsigned int whence,int fpart)
 {
 	if(RemoveSdFlag == 1)
 	{
@@ -2817,7 +2508,7 @@ int sDelRecord(const char *sFileName)
 		if(pGos_indexList->fileInfo.recordStartDate == (ldate&0xFFFF)
 			&&pGos_indexList->fileInfo.recordStartTime== (ltime&0xFFFF))
 		{
-			return DelectStorageFile(pGos_indexList->fileInfo.fileIndex);	 
+			return StorageDeleteFile(pGos_indexList->fileInfo.fileIndex);	 
 		}
 		pGos_indexList++;
 	}
@@ -2926,7 +2617,7 @@ unsigned int GetDiskInfo_Usable()
 
 char* Mux_open(const char *fileName)
 {
-	return storage_Open(fileName);
+	return Storage_Open(fileName);
 }
 
 int Mux_close(char* Fileindex,char *fileName)
@@ -3655,18 +3346,6 @@ int Mux_SetTimeStamp(char* fd,unsigned int start_or_end,unsigned int time_stamp)
 		return -1;
 	}
 	
-	/*for(lAviCount;lAviCount < IndexSum;lAviCount++)
-	{
-		if(indexList->fileInfo.fileIndex == fd)
-		{
-			break;
-		}
-		indexList ++;
-	}
-	if(lAviCount == IndexSum)
-	{
-		return -1;
-	}*/
 	indexList = (GosIndex*)fd;
 	
 	if(start_or_end == 1)
@@ -3699,7 +3378,7 @@ unsigned int Mux_Get_Oldest_Time()
 
 long long Mux_lseek(int Fileindex,unsigned int offset,unsigned int whence)
 {
-	return storage_Lseek(Fileindex,offset,whence,fPart);
+	return Storage_Lseek(Fileindex,offset,whence,fPart);
 }
 
 void *Gos_DiskManager_proc(void *p)
