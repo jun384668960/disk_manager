@@ -84,7 +84,7 @@ extern "C"{
 #endif
 
 int fPart;						//磁盘句柄
-int LockFlag;               	//文件锁
+CMtx LockFlag;               	//文件锁
 static int RemoveSdFlag = 0;			//移除sd卡标志
 static int FormatSdFlag = 0;			//格式化sd卡
 GosIndex *gMp4IndexList;     	//mp4文件索引
@@ -202,16 +202,13 @@ void CreateLongFileItem(long_msdos_dir_entry *de,unsigned char *shortname,
 //自定义文件锁
 void Storage_Lock()
 {
-	while(LockFlag > 0)
-	{
-		continue;
-	}
-	LockFlag = 1;
+	cmtx_enter(LockFlag);
+
 }
 
 void Storage_Unlock()
 {
-	LockFlag = 0;
+	cmtx_leave(LockFlag);
 }
 
 int FormatjpegDir(int fpart)
@@ -3439,6 +3436,8 @@ void *Gos_DiskManager_proc(void *p)
 	FILE* file_fd = NULL;
 	FILE *Flagfp;	
 	char flagFileName[128] = {0};
+	LockFlag = cmtx_create();
+	
 	while(1)
 	{
 		if(FormatSdFlag == 1)
@@ -3480,6 +3479,7 @@ void *Gos_DiskManager_proc(void *p)
 		usleep(1000*1000);
 	}
 
+	cmtx_delete(LockFlag);
 	pthread_exit(NULL);
 }
 
