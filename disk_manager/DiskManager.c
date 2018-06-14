@@ -186,7 +186,6 @@ void CreateLongFileItem(long_msdos_dir_entry *de,unsigned char *shortname,
 						unsigned long filesize,unsigned char nClusterSize,
 						char attribute)
 {
-	#if LONG_MSDOS_DIR_SUPPORT
 	//长目录每项最多携带13个字符
 	long_msdos_dir_entry *de_msdos = de;
 	memset(de_msdos,0,sizeof(long_msdos_dir_entry));
@@ -197,8 +196,6 @@ void CreateLongFileItem(long_msdos_dir_entry *de,unsigned char *shortname,
 	creatItem(0x01,pFileName,de_msdos->long_msdos_dir[1],Chk);
 	
 	CreateFileItem(&de_msdos->dir_entry,shortname,start,filesize,nClusterSize,attribute);
-	#endif
-	
 }
 
 
@@ -243,7 +240,7 @@ int FormatjpegDir(int fpart)
 	struct msdos_dir_entry *pChildDir = NULL;
 	if ((pChildDir = (struct msdos_dir_entry *)malloc(3 * sizeof(msdos_dir_entry))) == NULL)
 	{
-		printf("unable to allocate space in memory!!!\n");
+		LOGE_print("unable to allocate space in memory!!!");
 		return -1;
 	}
 	memset(pChildDir, 0, 3 * sizeof(msdos_dir_entry));	
@@ -254,7 +251,7 @@ int FormatjpegDir(int fpart)
 	if (write(fpart,(char *)(pChildDir), sizeof(msdos_dir_entry)) != sizeof(msdos_dir_entry))
 	{
 		free(pChildDir);
-		printf("write ChildDir error!!!\n");
+		LOGE_print("write pChildDir error!!!");
 		return -1;
 	}
 
@@ -270,7 +267,7 @@ int FormatjpegDir(int fpart)
 	if (write(fpart,(char *)(pChildDir+1),2*sizeof(msdos_dir_entry)) != 2*sizeof(msdos_dir_entry))
 	{
 		free(pChildDir);
-		printf("write ChildDir error!!!\n");
+		LOGE_print("write 2*sizeof(msdos_dir_entry) error!!!");
 		return -1;
 	}
 	dirOffset = lseek64(fpart,0,SEEK_CUR);
@@ -283,7 +280,7 @@ int FormatjpegDir(int fpart)
 	lRootFileSize -= 2*sizeof(msdos_dir_entry);
 	if ((pDir = (struct long_msdos_dir_entry *)malloc (lRootFileSize)) == NULL)
 	{
-		printf("unable to allocate space in memory!!!\n");
+		LOGE_print("unable to allocate lRootFileSize in memory!!!");
 		return -1;
 	}
 	memset(pDir, 0, lRootFileSize);
@@ -293,7 +290,7 @@ int FormatjpegDir(int fpart)
 	if ((pGos_index = (struct GosIndex *)malloc(gos_indexSize)) == NULL)
 	{
 		free(pDir);
-		printf("unable to allocate space in memory!!!\n");
+		LOGE_print("unable to allocate gos_indexSize in memory!!!");
 		return -1;
 	}
 	memset(pGos_index, 0, gos_indexSize);
@@ -336,7 +333,7 @@ int FormatjpegDir(int fpart)
 	{
 		free(pDir);
 		free(pGos_index);
-		printf("write ChildDir error!!!\n");
+		LOGE_print("write pDir error!!!");
 		return -1;
 	}
 	sync();
@@ -373,7 +370,7 @@ int FormatjpegDir(int fpart)
 	if (write(fpart,(char *)(pGos_index),gos_indexSize) != (int)gos_indexSize)
 	{
 		free(pGos_index);
-		printf("write ChildDir error!!!\n");
+		LOGE_print("write pGos_index error!!!");
 		return -1;
 	}
 	dirOffset = lseek64(fpart,0,SEEK_CUR);
@@ -387,7 +384,7 @@ int FormatjpegDir(int fpart)
 	lseek64(fpart,offset,SEEK_SET);
 	if (write(fpart,(char *)(&gHeadIndex), sizeof(HeadIndex)) != (int)sizeof(HeadIndex))
 	{
-		printf("write ChildDir error!!!\n");
+		LOGE_print("write gHeadIndex error!!!");
 		return -1;
 	}
 	sync();
@@ -414,29 +411,33 @@ int FormatParttion(int fpart, unsigned long filesize, unsigned long lAviNum,unsi
 	
 		err = ioctl( fpart, BLKGETSIZE64, &b );
 	
-		printf("disk_size=%d errcode=%d\n",b , err);
+		LOGI_print("disk_size=%d errcode=%d",b , err);
 	
 		if ( err || b == 0 || b == sz ) 	   
 			cblocks = sz;		 
 		else			 
 			cblocks = ( b >> 9 );	//总共扇区数
 
-		printf("cblocks..000...111==%llu\n",cblocks);	
+		LOGI_print("cblocks..000...111==%llu",cblocks);	
 		//减去 10M 的空间不分区
 		cblocks -= 10*1024*2; // 1kB = 2个扇区 得到所有需要分区的扇区
 	}
 
-	printf("cblocks..222!\n");	
+	LOGI_print("cblocks..222!");	
 
 	///获得文件的状态信息
 	struct stat statbuf;
 	if (fstat(fpart, &statbuf) < 0)
+	{
+		LOGE_print("fstat fpart ERROR ");	
 		return -1;
+	}
+		
 	if ( !S_ISBLK(statbuf.st_mode) )//如果文件是一个块设备，则S_ISBLK()返回真
 	{
 		statbuf.st_rdev = 0;///st_rdev;  
 	}
-	printf("cblocks..333! \n");	
+	LOGI_print("cblocks..333! ");	
 
 	//初始化DBR中的参数，即引导扇区
 	msdos_boot_sector mbs;	
@@ -489,12 +490,12 @@ int FormatParttion(int fpart, unsigned long filesize, unsigned long lAviNum,unsi
 	//计算出参数cluster_size fat32_length的取值
 	unsigned long long VolSize = cblocks*SECTORS_PER_BLOCK;//
 
-	printf( "cblocks..444!\n"  );	
+	LOGI_print("cblocks..444!");	
 
 	//先给cluster_size赋一个粗值
 	if ( VolSize <= 66600 )
 	{
-		printf("Volume too small for FAT32!\n" );
+		LOGE_print("Volume too small for FAT32!" );
 		return -1;
 	}else if ( VolSize <= 532480 )
 		mbs.cluster_size = 1;
@@ -510,7 +511,7 @@ int FormatParttion(int fpart, unsigned long filesize, unsigned long lAviNum,unsi
 	//为cluster_size选择一个合适的值
 	unsigned long  lTotalSectors = (unsigned long) cblocks; 
 
-	printf( "cblocks==%ld  lTotalSectors=%d\n",cblocks ,lTotalSectors );
+	LOGI_print("cblocks==%ld  lTotalSectors=%d",cblocks ,lTotalSectors );
 	
 	unsigned long long lFatData = lTotalSectors - DBR_RESERVED_SECTORS;	 //剩余需要分区的扇区个数
 	int maxclustsize = 128;	
@@ -542,7 +543,7 @@ int FormatParttion(int fpart, unsigned long filesize, unsigned long lAviNum,unsi
 
 	if ( !lClust32 )
 	{
-		printf( "Attempting to create a too large file system!\n" );
+		LOGE_print("Attempting to create a too large file system!");
 		return -1;
 	}
 
@@ -566,7 +567,7 @@ int FormatParttion(int fpart, unsigned long filesize, unsigned long lAviNum,unsi
 	unsigned long lStartDataofBlock = (lStartDataofSector + SECTORS_PER_BLOCK - 1) / SECTORS_PER_BLOCK;
 	if ( cblocks < lStartDataofBlock + 32 )	
 	{
-		printf( "Too few blocks for viable file system!!\n " );
+		LOGE_print("Too few blocks for viable file system!!");
 		return -1;
 	}
 	
@@ -575,15 +576,14 @@ int FormatParttion(int fpart, unsigned long filesize, unsigned long lAviNum,unsi
 	unsigned char* pZeroFat = NULL;
 	if ( ( pFat = ( unsigned char * )malloc(DEFAULT_SECTOR_SIZE) ) == NULL )
 	{
-		printf("nunable to allocate space for FAT image in memory!\n ");
+		LOGE_print("nunable to allocate space for FAT image in memory!");
 		return -1;
 	}
 	memset(pFat, 0, DEFAULT_SECTOR_SIZE);
 	
 	if ((pZeroFat = (unsigned char *)malloc(DEFAULT_SECTOR_SIZE)) == NULL)
 	{
-		printf("unable to allocate space for FAT image in memory! \n");
-
+		LOGE_print("unable to allocate space for FAT image in memory!");
 		free(pFat);
 		return -1;
 	}
@@ -622,7 +622,7 @@ int FormatParttion(int fpart, unsigned long filesize, unsigned long lAviNum,unsi
 	{
 		free(pFat);		
 		free(pZeroFat);
-		printf("unable to allocate space for root directory in memory\n");
+		LOGE_print("unable to allocate space for root directory in memory");
 		return -1;
 	}
 	memset(pRootDir, 0, lRootFileSize);
@@ -644,7 +644,7 @@ int FormatParttion(int fpart, unsigned long filesize, unsigned long lAviNum,unsi
 	unsigned long clu = (FILE_MAX_LENTH) / (mbs.cluster_size * DEFAULT_SECTOR_SIZE);
 	unsigned long lActualAviNum = lClust32  / clu;
 
-	printf("clu=%d lActualAviNum=%d lClust32=%d\n",clu,lActualAviNum,lClust32);
+	LOGI_print("clu=%d lActualAviNum=%d lClust32=%d",clu,lActualAviNum,lClust32);
 	      		
 	gHeadIndex.FAT1StartSector = DBR_RESERVED_SECTORS;
 	gHeadIndex.RootStartSector = gHeadIndex.FAT1StartSector + 2*lFatLength32;
@@ -659,7 +659,7 @@ int FormatParttion(int fpart, unsigned long filesize, unsigned long lAviNum,unsi
 		free(pFat);		
 		free(pZeroFat);
 		free(pRootDir);
-		printf("unable to allocate space for root directory in memory\n");
+		LOGE_print("unable to allocate space for root directory in memory");
 		return -1;
 	}
 	memset(pGos_index, 0, all_gos_indexSize);	
@@ -696,7 +696,7 @@ int FormatParttion(int fpart, unsigned long filesize, unsigned long lAviNum,unsi
 		free(pZeroFat);
 		free(pRootDir);
 		free(pGos_index);
-		printf("Out of memory!\n");
+		LOGE_print("Out of memory!");
 		return -1;		
 	}
 	memset(pInfoSector, 0, DEFAULT_SECTOR_SIZE);
@@ -723,11 +723,12 @@ int FormatParttion(int fpart, unsigned long filesize, unsigned long lAviNum,unsi
 		if ( write( fpart, pZeroFat, DEFAULT_SECTOR_SIZE ) != DEFAULT_SECTOR_SIZE )
 		{
 			FREE();
+			LOGE_print("write pZeroFat ERROR");
 			return -1;
 		}
 	}
 
-    printf( "cblocks..555!\n "  );		
+    LOGI_print("cblocks..555!");		
 
 	//写dbr
 	lseek64(fpart,0,SEEK_SET);
@@ -735,6 +736,7 @@ int FormatParttion(int fpart, unsigned long filesize, unsigned long lAviNum,unsi
 	if(write(fpart,(char *)&mbs,DEFAULT_SECTOR_SIZE) != DEFAULT_SECTOR_SIZE)
 	{
 		FREE();
+		LOGE_print("write mbs ERROR");
 		return -1;
 	}
 	
@@ -743,16 +745,18 @@ int FormatParttion(int fpart, unsigned long filesize, unsigned long lAviNum,unsi
 	if(write(fpart,(char *)pInfoSector,DEFAULT_SECTOR_SIZE) != DEFAULT_SECTOR_SIZE)
 	{
 		FREE();
+		LOGE_print("write pInfoSector ERROR");
 		return -1;
 	}
 
-	printf( "cblocks..666! \n"  );		
+	LOGI_print( "cblocks..666!");		
 
 	//写backup boot sector
 	lseek64(fpart,CF_LE_W(mbs.fat32.backup_boot)*DEFAULT_SECTOR_SIZE,SEEK_SET);
 	if(write(fpart,(char *)&mbs,DEFAULT_SECTOR_SIZE) != DEFAULT_SECTOR_SIZE)
 	{
 		FREE();
+		LOGE_print("write mbs ERROR");
 		return -1;
 	}
 
@@ -843,16 +847,18 @@ int FormatParttion(int fpart, unsigned long filesize, unsigned long lAviNum,unsi
 			if (write(fpart,(char *)pFatSector, DEFAULT_SECTOR_SIZE) != DEFAULT_SECTOR_SIZE)
 			{
 				FREE();
+				LOGE_print("write pFatSector ERROR");
 				return -1;
 			}
 		}	
 	}
 
-	printf("cblocks..777! \n"  );	
+	LOGI_print("cblocks..777!");	
 	//写根目录文件
 	if (write(fpart,(char *)pRootDir, lRootFileSize) != (int)lRootFileSize)
 	{
 		FREE();
+		LOGE_print("write pRootDir ERROR");
 		return -1;
 	}
 	
@@ -872,6 +878,7 @@ int FormatParttion(int fpart, unsigned long filesize, unsigned long lAviNum,unsi
 	if (write(fpart,(char *)(pGos_index), all_gos_indexSize) != (int)all_gos_indexSize)
 	{
 		FREE();
+		LOGE_print("write all_gos_indexSize ERROR");
 		return -1;
 	}
 
@@ -892,7 +899,7 @@ int FormatParttion(int fpart, unsigned long filesize, unsigned long lAviNum,unsi
 	FREE();
 	sync();
 
-	printf( "cblocks..8888 do_success!\n "  );
+	LOGI_print( "cblocks..8888 do_success!");
 
 	//更新索引标志
 	gHeadIndex.FlagIndexHead = FLAG_INDEX_HEAD;
@@ -901,7 +908,7 @@ int FormatParttion(int fpart, unsigned long filesize, unsigned long lAviNum,unsi
 	lseek64(fpart,offset,SEEK_SET);
 	if (write(fpart,(char *)(&gHeadIndex), sizeof(HeadIndex)) != (int)sizeof(HeadIndex))
 	{
-		printf("write ChildDir error!!!\n");
+		LOGE_print("write gHeadIndex error!!!");
 		return -1;
 	}
 	sync();
@@ -1036,10 +1043,11 @@ GosIndex* Get_Oldest_file()
 
 	if(StartTimeStamp == 0)
 	{
+		LOGE_print("StartTimeStamp == 0");
 		return NULL;
 	}
 	
-	printf("oldest time is %d, fd = %d\n",StartTimeStamp,Start_pGos_indexList->fileInfo.fileIndex);
+	LOGI_print("oldest time is %d, fd = %d",StartTimeStamp,Start_pGos_indexList->fileInfo.fileIndex);
 	return Start_pGos_indexList;	
 }
 
@@ -1081,6 +1089,7 @@ GosIndex* Get_Oldest_Alarm_file()
 
 	if(StartTimeStamp == 0 || Start_pGos_indexList == NULL)
 	{
+		LOGE_print("StartTimeStamp:%d Start_pGos_indexList:%p", StartTimeStamp, Start_pGos_indexList);
 		return NULL;
 	}
 	
@@ -1104,10 +1113,10 @@ GosIndex* Get_Oldest_Alarm_file()
 	
 	if(lAviCount == IndexSum) //没有报警录像文件
 	{
-		printf("there is no alarm file in this time!!!\n");
+		LOGE_print("there is no alarm file in this time!!!");
 		return NULL;
 	}	
-	printf("oldest alarm file time is %d, fd = %d\n",StartTimeStamp,Start_pGos_indexList->fileInfo.fileIndex);
+	LOGI_print("oldest alarm file time is %d, fd = %d",StartTimeStamp,Start_pGos_indexList->fileInfo.fileIndex);
 	return Start_pGos_indexList;
 }
 
@@ -1143,6 +1152,7 @@ int Storage_Write_gos_index(int fpart,enum RECORD_FILE_TYPE fileType)
 
 	if( NULL == gAVIndexList || (!StorageCheckSDExist()))
 	{
+		LOGE_print("gAVIndexList:%p SDExist:0", gAVIndexList);
 		return -1;
 	}
 
@@ -1151,6 +1161,7 @@ int Storage_Write_gos_index(int fpart,enum RECORD_FILE_TYPE fileType)
 	lseek64(fpart,gHeadIndex.HeadStartSector * DEFAULT_SECTOR_SIZE,SEEK_SET);
 	if (write(fpart,(char *)(&gHeadIndex), sizeof(HeadIndex)) != (int)sizeof(HeadIndex))
 	{
+		LOGE_print("write gHeadIndex error");
 		return -1;
 	}
 
@@ -1161,6 +1172,7 @@ int Storage_Write_gos_index(int fpart,enum RECORD_FILE_TYPE fileType)
 			all_gos_indexSize = sizeof(GosIndex) * gHeadIndex.lRootDirFileNum;
 			if (write(fpart,(char *)(gMp4IndexList), all_gos_indexSize) != (int)all_gos_indexSize)
 			{
+				LOGE_print("write gMp4IndexList error");
 				return -1;
 			}
 			break;
@@ -1171,6 +1183,7 @@ int Storage_Write_gos_index(int fpart,enum RECORD_FILE_TYPE fileType)
 			lseek64(fpart,gHeadIndex.JpegStartEA,SEEK_SET);
 			if (write(fpart,(char *)(gJpegIndexList), all_gos_indexSize) != (int)all_gos_indexSize)
 			{
+				LOGE_print("write gJpegIndexList error");
 				return -1;
 			}	
             break;
@@ -1180,6 +1193,7 @@ int Storage_Write_gos_index(int fpart,enum RECORD_FILE_TYPE fileType)
             all_gos_indexSize = sizeof(GosIndex) * gHeadIndex.lRootDirFileNum;
 			if (write(fpart,(char *)(gAVIndexList), all_gos_indexSize) != (int)all_gos_indexSize)
 			{
+				LOGE_print("write gAVIndexList error");
 				return -1;
 			}	
             break;
@@ -1187,6 +1201,7 @@ int Storage_Write_gos_index(int fpart,enum RECORD_FILE_TYPE fileType)
 
         default: 
 		{
+			LOGE_print("fileType:%d error", fileType);
 			return -1;
 		}            
     }
@@ -1200,6 +1215,7 @@ int Storage_Get_File_Size(const char *fileName)
 {
 	if(RemoveSdFlag == 1)
 	{
+		LOGE_print("error status, RemoveSdFlag:%d", RemoveSdFlag);
 		return -1;
 	}
 
@@ -1215,7 +1231,6 @@ int Storage_Get_File_Size(const char *fileName)
 	enum RECORD_FILE_TYPE FileType;
 	struct GosIndex *pGos_indexList;
 
-	//printf("file_name id %s\n",fileName);
 	sscanf(fileName,"%04d%02d%02d%02d%02d%02d%c%c%04d%s",&tm_year,&tm_mon,&tm_mday,&tm_hour,
 		&tm_min,&tm_sec,&zero,/*&recordtype,*/&alarmtype,/*&fileduration,*/filetype);
 
@@ -1235,6 +1250,7 @@ int Storage_Get_File_Size(const char *fileName)
 	}
 	else
 	{
+		LOGE_print("filetype:%d", filetype);
 		return -1;
 	}
 	unsigned int Checktime = tm_hour * 2048 + tm_min * 32 + tm_sec / 2;
@@ -1244,7 +1260,6 @@ int Storage_Get_File_Size(const char *fileName)
 	{
 		if(pGos_indexList->fileInfo.filestate == NON_EMPTY_OK)
 		{
-			//printf("%d %d    %d %d\n",pGos_indexList->fileInfo.recordStartDate,pGos_indexList->fileInfo.recordStartTime,Checkdate&0xffff,Checktime&0xffff);
 			if(pGos_indexList->fileInfo.recordStartDate == (Checkdate&0xffff)
 			   && pGos_indexList->fileInfo.recordStartTime == (Checktime&0xffff))
 			{
@@ -1274,6 +1289,7 @@ int StorageDeleteFile(int Fileindex)
 	
 	if(NULL == gMp4IndexList || NULL == gJpegIndexList || (!StorageCheckSDExist()))
 	{
+		LOGE_print("gMp4IndexList:%p gJpegIndexList:%p or SDExist false", gMp4IndexList, gJpegIndexList);
 		return -1;
 	}
 	
@@ -1326,6 +1342,7 @@ int StorageDeleteFile(int Fileindex)
 			}
 			else
 			{
+				LOGE_print("FileType:%d", FileType);
 				return -1;
 			}
 	
@@ -1344,6 +1361,7 @@ int StorageDeleteFile(int Fileindex)
 			if(write(fPart,&dir_entry,sizeof(long_msdos_dir_entry)) != sizeof(long_msdos_dir_entry))
 			{
 				Storage_Unlock();
+				LOGE_print("write dir_entry ERROR");
 				return -1;
 			}
 			Storage_Unlock();		
@@ -1356,6 +1374,7 @@ int StorageDeleteFile(int Fileindex)
 	}
 	if(lAviCount == IndexSum) //没有找到对应的扇区地址
 	{
+		LOGE_print("lAviCount:%d == IndexSum:%d", lAviCount, IndexSum);
 		return -1;
 	}		
 	
@@ -1453,6 +1472,7 @@ int Storage_Init(int mkfs_vfat)
 	
 	if(fPart > 0)
 	{
+		LOGW_print("fPart:%d", fPart);
 		close(fPart);
 		fPart = -1;
 	}
@@ -1468,11 +1488,11 @@ int Storage_Init(int mkfs_vfat)
 		fPart = open( szPartName, O_RDWR | O_LARGEFILE); //以大文件的方式打开
 		if(fPart < 0 )
 		{
-			printf("open szPartName=%s Failed!!!\n",szPartName);
+			LOGE_print("fPart:%d open szPartName=%s Failed!!!", fPart, szPartName);
 		}	
 		else
 		{
-			printf("open szPartName=%s OK!!!\n",szPartName);
+			LOGI_print("fPart:%d open szPartName=%s OK!!!", fPart, szPartName);
 			break;
 		}
 	}
@@ -1493,12 +1513,12 @@ int Storage_Init(int mkfs_vfat)
 
 		if(fPart < 0 )
 		{
-			printf("open szPartName=%s Failed!!!\n",szPartName);
+			LOGE_print("fPart:%d open szPartName=%s Failed!!!", fPart, szPartName);
 			return -1;
 		}	
 		else
 		{
-			printf("open szPartName=%s OK!!!\n",szPartName);
+			LOGI_print("fPart:%d open szPartName=%s OK!!!", fPart, szPartName);
 		}
 
 	}
@@ -1524,15 +1544,15 @@ int Storage_Init(int mkfs_vfat)
 	unsigned long all_gos_indexSize = sizeof(GosIndex) * gHeadIndex.lRootDirFileNum;
 	if ((gAVIndexList = (struct GosIndex *)malloc (all_gos_indexSize)) == NULL)
 	{
-		printf("unable to allocate space for gAVIndexList in memory\n");
+		LOGE_print("unable to allocate space for gAVIndexList in memory");
 		return -1;
 	}
-	printf("all_gos_indexSize ------------------>  %d\n",all_gos_indexSize);
+	LOGI_print("all_gos_indexSize %d",all_gos_indexSize);
 	memset(gAVIndexList, 0, all_gos_indexSize);
 	read(fPart,&gAVIndexList[0],all_gos_indexSize);
 	
 	FormatSdFlag = 0;
-	printf( "storage init do_success!!!\n "  );
+	LOGI_print( "storage init do_success!!!");
 	return 0;
 }
 
@@ -1542,6 +1562,7 @@ int Storage_Close_All()
 
 	if(fPart > 0)
 	{
+		LOGW_print("fPart:%d", fPart);
 		close(fPart);
 		fPart = -1;
 	}
@@ -1553,7 +1574,7 @@ int Storage_Close_All()
 
 	memset(&gHeadIndex,0,sizeof(HeadIndex));
 	Storage_Unlock();           //非安全退出状态下一定要解锁
-	printf("release all storage memory!!!\n");
+	LOGI_print("release all storage memory!!!");
 	return 0;
 }
 
@@ -1562,6 +1583,7 @@ char* Storage_Open(const char *fileName)
 {
 	if(RemoveSdFlag == 1)
 	{
+		LOGE_print("error status, RemoveSdFlag:%d", RemoveSdFlag);
 		return NULL;
 	}
 
@@ -1577,10 +1599,12 @@ char* Storage_Open(const char *fileName)
 
 	if(!CheckSdIsMount())
 	{
+		LOGE_print("SdIsMount false");
 		return NULL;
 	}
 	if(NULL == gAVIndexList || NULL == fileName || (!StorageCheckSDExist()))
 	{
+		LOGE_print("gAVIndexList:%p fileName:%p or SDExist false", gAVIndexList, fileName);
 		return NULL;
 	}
 
@@ -1615,7 +1639,7 @@ char* Storage_Open(const char *fileName)
 	pGos_indexList->DataSectorsEA = 0;
 	oldStartTimeStap = pGos_indexList->fileInfo.recordStartTimeStamp;
 	oldEndTimeStap   = pGos_indexList->fileInfo.recordEndTimeStamp;
-	printf("\n>>>>>>>>>>>>open DiskFd=%d\n",pGos_indexList->fileInfo.fileIndex);
+	LOGI_print("open DiskFd=%d",pGos_indexList->fileInfo.fileIndex);
 	return (char*)pGos_indexList;
 }
 
@@ -1624,6 +1648,7 @@ int Storage_Close(char* Fileindex,char *fileName,int fpart)
 {	
 	if(RemoveSdFlag == 1)
 	{
+		LOGE_print("error status, RemoveSdFlag:%d", RemoveSdFlag);
 		return -1;
 	}
 
@@ -1643,15 +1668,18 @@ int Storage_Close(char* Fileindex,char *fileName,int fpart)
 	char alarmtype;
 	if(Fileindex ==NULL)
 	{
+		LOGE_print("Fileindex ==NULL");
 		return -1;
 	}
 	if(!CheckSdIsMount())
 	{
+		LOGE_print("SdIsMount false");
 		return -1;
 	}
 
 	if( NULL == gAVIndexList || (!StorageCheckSDExist()))
 	{
+		LOGE_print("gAVIndexList:%p or SDExist false", gAVIndexList);
 		return -1;
 	}
 	
@@ -1674,7 +1702,7 @@ int Storage_Close(char* Fileindex,char *fileName,int fpart)
 		|| pGos_indexList->fileInfo.recordStartTimeStamp <= 1514736000
 		|| pGos_indexList->fileInfo.recordEndTimeStamp <= 1514736000) //时间小于2010年1月1日
 	{
-		printf("record file timestap error[%d,%d], return -1 !\n",pGos_indexList->fileInfo.recordStartTimeStamp
+		LOGE_print("record file timestap error[%d,%d]",pGos_indexList->fileInfo.recordStartTimeStamp
 			,pGos_indexList->fileInfo.recordEndTimeStamp);
 		pGos_indexList->fileInfo.filestate = NON_EMPTY_OK;
 		return -1;
@@ -1693,6 +1721,7 @@ int Storage_Close(char* Fileindex,char *fileName,int fpart)
 	}
 	if(cuCount > allCount)
 	{
+		LOGE_print("cuCount:%d > allCount:%d", cuCount, allCount);
 		return -1;   //文件长度大于预分配文件大小
 	}
 	fatOffset = pGos_indexList->CluSectorsNum * DEFAULT_SECTOR_SIZE + pGos_indexList->CluSectorsEA;
@@ -1700,6 +1729,7 @@ int Storage_Close(char* Fileindex,char *fileName,int fpart)
 	int *pfat = NULL;
 	if((pfat = (int *)malloc(allCount*sizeof(int))) == NULL)
 	{
+		LOGE_print("malloc error");
 		return -1;
 	}
 	memset(pfat,0,allCount*sizeof(int));
@@ -1725,6 +1755,7 @@ int Storage_Close(char* Fileindex,char *fileName,int fpart)
 		pfat = NULL;
 		ptmp = NULL;
 		Storage_Unlock();
+		LOGE_print("write pfat error");
 		return  -1;
 	}
 	free(pfat);
@@ -1751,7 +1782,7 @@ int Storage_Close(char* Fileindex,char *fileName,int fpart)
 		pGos_indexList->fileInfo.alarmType = alarmtype - 'a';
 
 		sprintf(fileName,"%04d%02d%02d%02d%02d%02d0%c.H264",tm_year,tm_mon,tm_mday,tm_hour,tm_min,(tm_sec/2)*2,pGos_indexList->fileInfo.alarmType+'a');
-		printf("[record_lib]close filename === %s\n",fileName);
+		LOGI_print("close filename %s",fileName);
 		strcpy(longName,fileName);
 	}
 
@@ -1774,6 +1805,7 @@ int Storage_Close(char* Fileindex,char *fileName,int fpart)
 	if(write(fpart,&dir_entry,sizeof(long_msdos_dir_entry)) != sizeof(long_msdos_dir_entry))
 	{
 		Storage_Unlock();
+		LOGE_print("write dir_entry error");
 		return -1;
 	}
 	Storage_Unlock();
@@ -1793,12 +1825,13 @@ int Storage_Read(char* Fileindex,int offset,void *data,int dataSize,int fpart)
 {
 	if(RemoveSdFlag == 1)
 	{
+		LOGE_print("error status, RemoveSdFlag:%d", RemoveSdFlag);
 		return -1;
 	}
 
 	if( NULL == gAVIndexList || Fileindex == NULL)
 	{
-		printf("error !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+		LOGE_print("gAVIndexList:%p Fileindex:%p", gAVIndexList, Fileindex);
 		return -1;
 	}
 
@@ -1816,7 +1849,7 @@ int Storage_Read(char* Fileindex,int offset,void *data,int dataSize,int fpart)
 	//连续读
 	if(offset >= pGos_indexList->fileInfo.fileSize)
 	{
-		printf("offset >= pGos_indexList->fileInfo.fileSize##########\n");
+		LOGE_print("offset:%d >= fileSize:%d", offset, pGos_indexList->fileInfo.fileSize);
 		return 0;
 	}
 	unsigned long long DataSectorsEA  = pGos_indexList->DataSectorsNum * DEFAULT_SECTOR_SIZE + offset;
@@ -1825,11 +1858,9 @@ int Storage_Read(char* Fileindex,int offset,void *data,int dataSize,int fpart)
 	datalen = pGos_indexList->DataSectorsNum * DEFAULT_SECTOR_SIZE;
 	unsigned long all_read_size = DataSectorsEA - datalen;
 	unsigned long remain_size = pGos_indexList->fileInfo.fileSize - all_read_size;
-	//printf("pGos_indexList->fileInfo.fileSize = %d, all_read_size = %d, remain_size = %d ,dataSize = %d\n",pGos_indexList->fileInfo.fileSize,
-	//	all_read_size,remain_size,dataSize);
 	if(remain_size == 0)
 	{
-		printf("file is read over.\n");
+		LOGE_print("file is read over.");
 		return 0;
 	}
 	if(remain_size < (unsigned long)dataSize)
@@ -1863,12 +1894,13 @@ int Storage_Write(char* Fileindex,const void *data,unsigned int dataSize,int fpa
 {
 	if(RemoveSdFlag == 1)
 	{
+		LOGE_print("error status, RemoveSdFlag:%d", RemoveSdFlag);
 		return -1;
 	}
 
 	if(Fileindex == NULL)
 	{
-		printf("error!! Fileindex is null\n");
+		LOGE_print("error!! Fileindex is null");
 		return -1;
 	}
 	int lAviCount;
@@ -1883,7 +1915,7 @@ int Storage_Write(char* Fileindex,const void *data,unsigned int dataSize,int fpa
 
 	if(NULL == gAVIndexList || (!StorageCheckSDExist()))
 	{
-		printf("Storage_Write:line[%d] error gAVIndexList == NULL or sd remove\n",__LINE__);
+		LOGE_print("gAVIndexList:%p or SDExist false", gAVIndexList);
 		return -1;
 	}
 	pGos_indexList = gAVIndexList;
@@ -1893,7 +1925,7 @@ int Storage_Write(char* Fileindex,const void *data,unsigned int dataSize,int fpa
 
 	if(gAVIndexList == NULL)
 	{
-		printf("Storage_Write:line[%d] error gAVIndexList == NULL\n",__LINE__);
+		LOGE_print("gAVIndexList == NULL");
 		return -1;
 	}
 	
@@ -1909,19 +1941,18 @@ int Storage_Write(char* Fileindex,const void *data,unsigned int dataSize,int fpa
 	//文件的长度不能超过预分配给每个文件的大小 
 	if((pGos_indexList->fileInfo.fileSize + dataSize) > MaxFileSize)
 	{
-		printf("Storage_Write:line[%d] error fileSize > maxfilesize\n",__LINE__);
+		LOGE_print("error fileSize:%d + dataSize:%d > maxfilesize:%d", pGos_indexList->fileInfo.fileSize, dataSize, MaxFileSize);
 		return -1;
 	}
 
 	if(gAVIndexList == NULL)
 	{
-		printf("Storage_Write:line[%d] error gAVIndexList == NULL\n",__LINE__);
+		LOGE_print("gAVIndexList == NULL");
 		return -1;
 	}
 
 	//加锁
 	Storage_Lock();
-	//printf("pGos_indexList->DataSectorsEA=%llu\n",pGos_indexList->DataSectorsEA);
 	lseek64(fpart,pGos_indexList->DataSectorsEA,SEEK_SET);
 	nlen = write(fpart,(char *)data,dataSize);
 	Storage_Unlock();
@@ -1929,13 +1960,13 @@ int Storage_Write(char* Fileindex,const void *data,unsigned int dataSize,int fpa
 	
 	if(gAVIndexList == NULL)
 	{
-		printf("Storage_Write:line[%d] error gAVIndexList == NULL\n",__LINE__);
+		LOGE_print("gAVIndexList == NULL");
 		return -1;
 	}
 
 	if(nlen < 0 || nlen != dataSize)
 	{
-		printf("Storage_Write:line[%d] error nlen = %d\n",__LINE__,nlen);
+		LOGE_print("write error nlen = %d dataSize:%d", nlen, dataSize);
 		return nlen;
 	}
 	pGos_indexList->DataSectorsEA += nlen;
@@ -1947,13 +1978,10 @@ int Storage_Write(char* Fileindex,const void *data,unsigned int dataSize,int fpa
 		pGos_indexList->fileInfo.fileSize += (beyondSize - pGos_indexList->fileInfo.fileSize); 
 	}
 
-	//printf("pGos_index->fileInfo.fileSize =%lu\n",pGos_indexList->fileInfo.fileSize);
-	//sync();
-
 	int max_len = MaxFileSize - 512 * 1024;
 	if(max_len <= 0)
 	{
-		printf("Storage_Write:line[%d] error max_len <= 0\n",__LINE__);
+		LOGE_print("error max_len :%d", max_len);
 		return -1;
 	}
 	if((pGos_indexList->fileInfo.fileSize + dataSize) > max_len)
@@ -1969,11 +1997,13 @@ long long Storage_Lseek(int Fileindex,unsigned int offset,unsigned int whence,in
 {
 	if(RemoveSdFlag == 1)
 	{
+		LOGE_print("error status, RemoveSdFlag:%d", RemoveSdFlag);
 		return -1;
 	}
 
 	if(NULL == gAVIndexList || (!StorageCheckSDExist()))
 	{
+		LOGE_print("gAVIndexList:%p or SDExist false", gAVIndexList);
 		return -1;
 	}
 	
@@ -1996,6 +2026,7 @@ long long Storage_Lseek(int Fileindex,unsigned int offset,unsigned int whence,in
 	}
 	if(lAviCount == IndexSum) //没有找到对应的扇区地址
 	{
+		LOGE_print("lAviCount:%d == IndexSum:%d", lAviCount, IndexSum);
 		return -1;
 	}	
 
@@ -2019,15 +2050,16 @@ long long Storage_Lseek(int Fileindex,unsigned int offset,unsigned int whence,in
 		}
         default:
 		{
+			LOGE_print("whence:%d error");
 			return -1;
 		}          
    }
 
 	pGos_indexList->DataSectorsEA = DataEA;
-	//printf("offset64=%llu offset=%u\n",pGos_indexList->DataSectorsEA,offset);
 	//文件偏移不能超过预分配给每个文件的大小
 	if(offset > MP4_MAX_LENTH || offset > pGos_indexList->fileInfo.fileSize)
 	{
+		LOGE_print("offset:%d>MP4_MAX_LENTH:%d || offset:%d>fileSize:%lu", offset, MP4_MAX_LENTH, offset, pGos_indexList->fileInfo.fileSize);
 		return -1;	
 	}
 	
@@ -2039,6 +2071,7 @@ char *sGetMonthEventList(char *sMonthEventList)
 {
 	if(RemoveSdFlag == 1)
 	{
+		LOGE_print("error status, RemoveSdFlag:%d", RemoveSdFlag);
 		return NULL;
 	}
 
@@ -2050,6 +2083,7 @@ char *sGetMonthEventList(char *sMonthEventList)
 
 	if(NULL == gAVIndexList || NULL == sMonthEventList || (!StorageCheckSDExist()))
 	{
+		LOGE_print("gAVIndexList:%p sMonthEventList:%p or SDExist false", gAVIndexList, sMonthEventList);
 		return NULL;
 	}
 	
@@ -2115,6 +2149,7 @@ char *sGetDayEventList(const char *date, unsigned int file_type, char *sDayEvent
 {
 	if(NULL == date || NULL == gAVIndexList || (!StorageCheckSDExist()))
 	{
+		LOGE_print("gAVIndexList:%p date:%p or SDExist false", gAVIndexList, date);
 		return NULL;
 	}
 	
@@ -2227,6 +2262,7 @@ int sGetDayAssignTimeEventList(const char *filename, char *sDayEventList,int dir
 	
 	if(NULL == filename ||gAVIndexList == NULL || (!StorageCheckSDExist()))
 	{
+		LOGE_print("gAVIndexList:%p filename:%p or SDExist false", gAVIndexList, filename);
         return 0;
 	}
 	sscanf(filename,"%04d%02d%02d%02d%02d%02d%c%c%s",&tm_year,&tm_mon,&tm_mday,&tm_hour,
@@ -2388,9 +2424,6 @@ int sGetDayAssignTimeEventList(const char *filename, char *sDayEventList,int dir
 	ptmp = NULL;
 	pdirection = NULL;
 	
-	//*filecounts = counts;
-	//NMaxLength = strlen(sDayEventList);	
-	
 	return rltCount;
 }
 
@@ -2400,6 +2433,8 @@ char *sGetRecordFullName(const char *sFileName, char *sFullName)
 	if(NULL == sFileName || NULL == gMp4IndexList || NULL == gJpegIndexList 
 		|| NULL == sFullName || (!StorageCheckSDExist()))
 	{
+		LOGE_print("gMp4IndexList:%p gJpegIndexList:%p sFileName:%p sFullName:%p or SDExist false"
+			, gMp4IndexList, gJpegIndexList, sFileName, sFullName);
 		return NULL;
 	}
 	
@@ -2440,6 +2475,7 @@ char *sGetRecordFullName(const char *sFileName, char *sFullName)
 	}
 	else
 	{
+		LOGE_print("filetype:%d", filetype);
 		return NULL;
 	}
 	
@@ -2448,13 +2484,8 @@ char *sGetRecordFullName(const char *sFileName, char *sFullName)
 		if(pGos_indexList->fileInfo.recordStartDate == (ldate&0xFFFF)
 			&&pGos_indexList->fileInfo.recordStartTime == (ltime&0xFFFF))
 		{
-			#if LONG_MSDOS_DIR_SUPPORT	
-				sprintf(sFullName,"%s/%s",sDir,sFileName);
-				return sFullName;
-			#else
-			    sprintf(sFullName,"%s/%08d%s",sDir,pGos_indexList->fileInfo.fileIndex,pFileTypeString[FileType]);
-				return sFullName;
-			#endif
+			sprintf(sFullName,"%s/%s",sDir,sFileName);
+			return sFullName;
 		}
 		pGos_indexList++;
 	}	
@@ -2466,6 +2497,8 @@ int sDelRecord(const char *sFileName)
 {
 	if(NULL == gMp4IndexList || NULL == gJpegIndexList || NULL == sFileName || (!StorageCheckSDExist()))
 	{
+		LOGE_print("gMp4IndexList:%p gJpegIndexList:%p sFileName:%p or SDExist false"
+			, gMp4IndexList, gJpegIndexList, sFileName);
 		return -1;
 	}
 	
@@ -2500,6 +2533,7 @@ int sDelRecord(const char *sFileName)
 	}
 	else
 	{
+		LOGE_print("filetype:%d", filetype);
 		return -1;
 	}
 	
@@ -2559,7 +2593,7 @@ void ChildDirSureSDCanWrite()
 		int flag = 0xFFFFFFFF;
 		write(fPart,&flag, 4);  
 		Storage_Unlock();
-		//printf("offset=%llu lFileNum=%d\n",offset,lFileNum);
+		//printf("offset=%llu lFileNum=%d",offset,lFileNum);
 		sync();
     //} 
    // else
@@ -2580,10 +2614,12 @@ unsigned int GetDiskInfo_Usable()
 {
 	if(RemoveSdFlag == 1)
 	{
+		LOGE_print("error status, RemoveSdFlag:%d", RemoveSdFlag);
 		return 0;
 	}
 	if(NULL == gAVIndexList || (!StorageCheckSDExist()))
 	{
+		LOGE_print("gAVIndexList:%p or SDExist false", gAVIndexList);
 		return 0;
 	}
 
@@ -2643,6 +2679,7 @@ int Mux_Print_fd_time()
 
 	if(gAVIndexList == NULL || (!StorageCheckSDExist()))
 	{
+		LOGE_print("gAVIndexList:%p or SDExist false", gAVIndexList);
 		return -1;
 	}
 	tmpIndex = gAVIndexList;
@@ -2652,7 +2689,7 @@ int Mux_Print_fd_time()
 	{
 		if(tmpIndex->fileInfo.filestate == NON_EMPTY_OK)
 		{
-			printf("fd:%d  start: %d   end : %d  alarmType : %d\n",tmpIndex->fileInfo.fileIndex,tmpIndex->fileInfo.recordStartTimeStamp,
+			LOGI_print("fd:%d  start: %d   end : %d  alarmType : %d",tmpIndex->fileInfo.fileIndex,tmpIndex->fileInfo.recordStartTimeStamp,
 				tmpIndex->fileInfo.recordEndTimeStamp,tmpIndex->fileInfo.alarmType);
 		}
 		tmpIndex++;
@@ -2675,16 +2712,17 @@ char* Mux_GetFdFromTime(char* lastFd,char *filename,unsigned int timestamp,unsig
 {
 	if(RemoveSdFlag == 1)
 	{
+		LOGE_print("error status, RemoveSdFlag:%d", RemoveSdFlag);
 		return NULL;
 	}
 	GosIndex * GetIndex = NULL;
 	GosIndex * FirstIndex = NULL;
 	GosIndex * tmpIndex = NULL;
 	GosIndex * nextIndex = NULL;
-	//int ret_fd = 0;;
 
 	if(gAVIndexList == NULL || filename == NULL || (!StorageCheckSDExist()))
 	{
+		LOGE_print("gAVIndexList:%p filename:%p or SDExist false", gAVIndexList, filename);
 		return NULL;
 	}
 
@@ -2709,9 +2747,10 @@ char* Mux_GetFdFromTime(char* lastFd,char *filename,unsigned int timestamp,unsig
 		
 		if(lAviCount == IndexSum)
 		{
+			LOGE_print("lAviCount:%d = IndexSum:%d", lAviCount, IndexSum);
 			return NULL;
 		}
-		printf("got it ,fd: %d, start: %d, end: %d\n",FirstIndex->fileInfo.fileIndex,FirstIndex->fileInfo.recordStartTimeStamp,FirstIndex->fileInfo.recordEndTimeStamp);
+		LOGI_print("got it ,fd: %d, start: %d, end: %d",FirstIndex->fileInfo.fileIndex,FirstIndex->fileInfo.recordStartTimeStamp,FirstIndex->fileInfo.recordEndTimeStamp);
 		if(time_lag != NULL)
 			*time_lag = FirstIndex->fileInfo.recordEndTimeStamp - FirstIndex->fileInfo.recordStartTimeStamp;
 		if(first_timestamp != NULL)
@@ -2726,7 +2765,7 @@ char* Mux_GetFdFromTime(char* lastFd,char *filename,unsigned int timestamp,unsig
 		int tm_mday  = FirstIndex->fileInfo.recordStartDate & 0x1F;	
 
 		sprintf(filename,"%04d%02d%02d%02d%02d%02d0%c.H264",tm_year+1980,tm_mon,tm_mday,tm_hour,tm_min,tm_sec*2,FirstIndex->fileInfo.alarmType+'a');
-		printf("filename--------------->%s\n",filename);			
+		LOGI_print("filename %s",filename);			
 		return (char*)FirstIndex;
 	}
 	else
@@ -2734,14 +2773,13 @@ char* Mux_GetFdFromTime(char* lastFd,char *filename,unsigned int timestamp,unsig
 		GetIndex = (GosIndex*)lastFd;//Get_Index_Form_fd(lastFd);
 		if(GetIndex == NULL)
 		{
+			LOGE_print("GetIndex == NULL");
 			return NULL;
 		}
 		tmpIndex = GetIndex;
 		if(GetIndex == &gAVIndexList[gHeadIndex.lRootDirFileNum-1])
 		{
 			GetIndex = &gAVIndexList[1];
-			//printf("============= %d =============\n",GetIndex->fileInfo.fileIndex);
-			//printf("time : %d, %d\n",GetIndex->fileInfo.recordStartTimeStamp,tmpIndex->fileInfo.recordEndTimeStamp);
 		}
 		else 
 		{
@@ -2749,16 +2787,19 @@ char* Mux_GetFdFromTime(char* lastFd,char *filename,unsigned int timestamp,unsig
 		}
 
 		if(GetIndex->fileInfo.filestate != NON_EMPTY_OK)
+		{
+			LOGE_print("filestate != NON_EMPTY_OK");
 			return NULL;
+		}
 		
 		while(GetIndex->fileInfo.recordStartTimeStamp < tmpIndex->fileInfo.recordEndTimeStamp)
 		{
-			//ret_fd = 0;
 			if(GetIndex == Get_Oldest_file())
 			{
+				LOGE_print("GetIndex:%p == Get_Oldest_file()", GetIndex);
 				return NULL;
 			}
-			printf("skip curr indext, return next indext.\n");
+			LOGI_print("skip curr indext, return next indext.");
 			tmpIndex = GetIndex;
 			if(GetIndex == &gAVIndexList[gHeadIndex.lRootDirFileNum-1])
 			{
@@ -2773,7 +2814,7 @@ char* Mux_GetFdFromTime(char* lastFd,char *filename,unsigned int timestamp,unsig
 		if(time_lag != NULL)
 		{
 			*time_lag = GetIndex->fileInfo.recordEndTimeStamp - GetIndex->fileInfo.recordStartTimeStamp;
-			printf("time lag ------- > %d\n",*time_lag);
+			LOGI_print("time lag %d",*time_lag);
 		}
 		if(first_timestamp != NULL)
 			*first_timestamp = GetIndex->fileInfo.recordStartTimeStamp;
@@ -2786,9 +2827,7 @@ char* Mux_GetFdFromTime(char* lastFd,char *filename,unsigned int timestamp,unsig
 		int tm_mon	= (GetIndex->fileInfo.recordStartDate >> 5) & 0x0F;
 		int tm_mday  = GetIndex->fileInfo.recordStartDate & 0x1F;	
 		sprintf(filename,"%04d%02d%02d%02d%02d%02d0%c.H264",tm_year+1980,tm_mon,tm_mday,tm_hour,tm_min,tm_sec*2,GetIndex->fileInfo.alarmType+'a');
-		printf("filename--------------->%s\n",filename);
-		
-		//ret_fd = GetIndex->fileInfo.fileIndex;
+		LOGI_print("filename:%s",filename);
 		
 		return (char*)GetIndex;
 	}
@@ -2803,6 +2842,7 @@ char* Mux_GetAllRecordFileTime(char* lastFd,unsigned int start_time,unsigned int
 {
 	if(RemoveSdFlag == 1)
 	{
+		LOGE_print("error status, RemoveSdFlag:%d", RemoveSdFlag);
 		return NULL;
 	}
 
@@ -2813,6 +2853,7 @@ char* Mux_GetAllRecordFileTime(char* lastFd,unsigned int start_time,unsigned int
 	unsigned int EndTimeStamp = 0;
     if(NULL == gAVIndexList || (!StorageCheckSDExist()))
     {
+    	LOGE_print("gAVIndexList:%p or SDExist false", gAVIndexList);
         return NULL;
     }
 	if(lastFd == NULL)
@@ -2820,6 +2861,7 @@ char* Mux_GetAllRecordFileTime(char* lastFd,unsigned int start_time,unsigned int
 		pGos_indexList = Get_Oldest_file();
 		if(pGos_indexList == NULL)
 		{
+			LOGE_print("pGos_indexList:%p", pGos_indexList);
 			return NULL;
 		}
 		lAviCount = 1;
@@ -2830,7 +2872,7 @@ char* Mux_GetAllRecordFileTime(char* lastFd,unsigned int start_time,unsigned int
 			{
 				if(pGos_indexList->fileInfo.recordStartTimeStamp >= start_time)
 				{
-					printf("get all file,start time %d\n",pGos_indexList->fileInfo.recordStartTimeStamp);
+					LOGI_print("get all file,start time %d",pGos_indexList->fileInfo.recordStartTimeStamp);
 					break;
 				}
 			}
@@ -2845,7 +2887,7 @@ char* Mux_GetAllRecordFileTime(char* lastFd,unsigned int start_time,unsigned int
 		}
 		if(lAviCount == IndexSum) 
 		{
-			printf("there are no record file in this time!!\n");
+			LOGE_print("there are no record file in this time!!");
 			return NULL;
 		}
 	}
@@ -2856,6 +2898,7 @@ char* Mux_GetAllRecordFileTime(char* lastFd,unsigned int start_time,unsigned int
 	
 	if(pGos_indexList == NULL)
 	{
+		LOGE_print("pGos_indexList:%p", pGos_indexList);
 		return NULL;
 	}
 	
@@ -2879,18 +2922,18 @@ char* Mux_GetAllRecordFileTime(char* lastFd,unsigned int start_time,unsigned int
 		{
 			if(pGos_indexList->fileInfo.recordEndTimeStamp > end_time)
 			{
-				printf("pGos_indexList->fileInfo.recordEndTimeStamp >= end_time recordEndTimeStamp= %d \n",pGos_indexList->fileInfo.recordEndTimeStamp);
+				LOGI_print("pGos_indexList->fileInfo.recordEndTimeStamp >= end_time recordEndTimeStamp= %d",pGos_indexList->fileInfo.recordEndTimeStamp);
 				break;
 			}
 			if(pGos_indexList->fileInfo.recordStartTimeStamp < EndTimeStamp)
 			{
-				printf("StartTimeStamp > lastEndTimeStamp: fd:%d s:%d   e:%d   EndTimeStamp:%d\n",
+				LOGI_print("StartTimeStamp > lastEndTimeStamp: fd:%d s:%d   e:%d   EndTimeStamp:%d",
 					pGos_indexList->fileInfo.fileIndex,pGos_indexList->fileInfo.recordStartTimeStamp,pGos_indexList->fileInfo.recordEndTimeStamp,EndTimeStamp);
 				if(pGos_indexList == Get_Oldest_file())
 				{
 					break;
 				}
-				printf("skip curr indext, return next indext.\n");
+				printf("skip curr indext, return next indext.");
 				record_list->StartTimeStamp = StartTimeStamp;
 				record_list->EndTimeStamp = EndTimeStamp;
 				if(pGos_indexList == &gAVIndexList[IndexSum-1])
@@ -2903,9 +2946,7 @@ char* Mux_GetAllRecordFileTime(char* lastFd,unsigned int start_time,unsigned int
 				}
 			}
 			if((pGos_indexList->fileInfo.recordStartTimeStamp - EndTimeStamp) > MAX_INTERVAL_TIME)
-			{
-				//printf("start: %d  end: %d\n",StartTimeStamp,EndTimeStamp);
-				
+			{				
 				record_list->StartTimeStamp = StartTimeStamp;
 				record_list->EndTimeStamp = EndTimeStamp;
 				return (char*)pGos_indexList;
@@ -2913,7 +2954,7 @@ char* Mux_GetAllRecordFileTime(char* lastFd,unsigned int start_time,unsigned int
 			EndTimeStamp = pGos_indexList->fileInfo.recordEndTimeStamp;
 		}
 	}
-	printf("find out all file!!!!!!!!!\n");
+	LOGI_print("find out all file!");
 	
 	record_list->StartTimeStamp = StartTimeStamp;
 	record_list->EndTimeStamp = EndTimeStamp;
@@ -2925,6 +2966,7 @@ char* Mux_GetAllAlarmRecordFileTime(char* lastFd,unsigned int start_time,unsigne
 {
 	if(RemoveSdFlag == 1)
 	{
+		LOGE_print("error status, RemoveSdFlag:%d", RemoveSdFlag);
 		return NULL;
 	}
 
@@ -2936,16 +2978,17 @@ char* Mux_GetAllAlarmRecordFileTime(char* lastFd,unsigned int start_time,unsigne
 	unsigned int AlarmType = 0;
     if(NULL == gAVIndexList || (!StorageCheckSDExist()))
     {
+    	LOGE_print("gAVIndexList:%p or SDExist=false", gAVIndexList);
         return NULL;
     }
 	if(lastFd == NULL)
 	{
-		
 		lAviCount = 1;
 		IndexSum = gHeadIndex.lRootDirFileNum;
 		pGos_indexList = Get_Oldest_file();
 		if(pGos_indexList == NULL)
 		{
+			LOGE_print("pGos_indexList:%p", pGos_indexList);
 			return NULL;
 		}
 		
@@ -2967,7 +3010,7 @@ char* Mux_GetAllAlarmRecordFileTime(char* lastFd,unsigned int start_time,unsigne
 
 		if(lAviCount == IndexSum) //没有报警录像文件
 		{
-			printf("there is no alarm file in this time!!!\n");
+			LOGE_print("there is no alarm file in this time!!");
 			return NULL;
 		}		
 	}
@@ -2976,6 +3019,7 @@ char* Mux_GetAllAlarmRecordFileTime(char* lastFd,unsigned int start_time,unsigne
 		pGos_indexList = (GosIndex*)lastFd;//Get_Index_Form_fd(lastFd);
 		if(pGos_indexList == NULL || pGos_indexList->fileInfo.alarmType == 0)
 		{
+			LOGE_print("pGos_indexList:%p pGos_indexList->fileInfo.alarmType:%d", pGos_indexList, pGos_indexList->fileInfo.alarmType);
 			return NULL;
 		}
 	}
@@ -3003,12 +3047,12 @@ char* Mux_GetAllAlarmRecordFileTime(char* lastFd,unsigned int start_time,unsigne
 			}
 			if(pGos_indexList->fileInfo.recordStartTimeStamp < EndTimeStamp)
 			{
-				printf("StartTimeStamp < lastEndTimeStamp\n");
+				LOGI_print("StartTimeStamp < lastEndTimeStamp");
 				if(pGos_indexList == Get_Oldest_Alarm_file())
 				{
 					break;
 				}
-				printf("skip curr indext, return next indext.\n");
+				LOGI_print("skip curr indext, return next indext.");
 				record_list->StartTimeStamp = StartTimeStamp;
 				record_list->EndTimeStamp = EndTimeStamp;
 				record_list->AlarmType = AlarmType;
@@ -3023,7 +3067,6 @@ char* Mux_GetAllAlarmRecordFileTime(char* lastFd,unsigned int start_time,unsigne
 			}
 			if((pGos_indexList->fileInfo.recordStartTimeStamp - EndTimeStamp) > MAX_INTERVAL_TIME || pGos_indexList->fileInfo.alarmType != AlarmType)
 			{
-				//printf("start: %d  end: %d\n",StartTimeStamp,EndTimeStamp);
 				record_list->StartTimeStamp = StartTimeStamp;
 				record_list->EndTimeStamp = EndTimeStamp;
 				record_list->AlarmType = AlarmType;
@@ -3033,7 +3076,7 @@ char* Mux_GetAllAlarmRecordFileTime(char* lastFd,unsigned int start_time,unsigne
 		}
 	}
 
-	printf("find out all file!!!!!!!!!\n");
+	LOGI_print("find out all file!!");
 	record_list->StartTimeStamp = StartTimeStamp;
 	record_list->EndTimeStamp = EndTimeStamp;
 	record_list->AlarmType = AlarmType;
@@ -3045,11 +3088,13 @@ char* Mux_RefreshRecordList(unsigned int reference_time,char* lastFd,RECORD_LIST
 {
 	if(RemoveSdFlag == 1)
 	{
+		LOGE_print("error status, RemoveSdFlag:%d", RemoveSdFlag);
 		return NULL;
 	}
 
 	if(gAVIndexList == NULL || reference_time <= 0)
 	{
+		LOGE_print("gAVIndexList:%p reference_time:%d", gAVIndexList, reference_time);
 		return NULL;
 	}
 
@@ -3071,6 +3116,7 @@ char* Mux_RefreshRecordList(unsigned int reference_time,char* lastFd,RECORD_LIST
 		pre_indexList = Get_Oldest_file();
 		if(pre_indexList == NULL)
 		{
+			LOGE_print("pre_indexList:%p", pre_indexList);
 			return NULL;
 		}
 		for(lAviCount;lAviCount < IndexSum;lAviCount++)
@@ -3079,7 +3125,6 @@ char* Mux_RefreshRecordList(unsigned int reference_time,char* lastFd,RECORD_LIST
 			{
 				if(pre_indexList->fileInfo.recordStartTimeStamp >= time_stamp) //找到需要刷新的位置
 				{
-					//printf("find the reflash pos ,fd = %d , %d ,%d!!!!!!!!!!!!!!!\n",pre_indexList->fileInfo.fileIndex,pre_indexList->fileInfo.recordStartTimeStamp,time_stamp);
 					break;
 				}
 			}
@@ -3091,7 +3136,7 @@ char* Mux_RefreshRecordList(unsigned int reference_time,char* lastFd,RECORD_LIST
 		
 		if(lAviCount == IndexSum)
 		{
-			printf("there is no new record file. return 0.\n");
+			LOGE_print("there is no new record file. return 0");
 			return NULL;
 		}
 	}
@@ -3100,6 +3145,7 @@ char* Mux_RefreshRecordList(unsigned int reference_time,char* lastFd,RECORD_LIST
 		pre_indexList = (GosIndex*)lastFd;//Get_Index_Form_fd(lastFd);
 		if(pre_indexList == NULL)
 		{
+			LOGE_print("pre_indexList:%p", pre_indexList);
 			return NULL;
 		}
 	}
@@ -3124,12 +3170,11 @@ char* Mux_RefreshRecordList(unsigned int reference_time,char* lastFd,RECORD_LIST
 		{
 			if(pre_indexList->fileInfo.recordStartTimeStamp < EndTimeStamp)
 			{
-				//printf("%d  %d,StartTimeStamp > lastEndTimeStamp\n",pre_indexList->fileInfo.recordStartTimeStamp,EndTimeStamp);
 				if(pre_indexList == Get_Oldest_file())
 				{
 					break;
 				}
-				printf("skip curr indext, return next indext.\n");
+				LOGI_print("skip curr indext, return next indext.");
 				record_list->StartTimeStamp = StartTimeStamp;
 				record_list->EndTimeStamp = EndTimeStamp;
 				if(pre_indexList == &gAVIndexList[IndexSum-1])
@@ -3143,7 +3188,6 @@ char* Mux_RefreshRecordList(unsigned int reference_time,char* lastFd,RECORD_LIST
 			}
 			if((pre_indexList->fileInfo.recordStartTimeStamp - EndTimeStamp) > MAX_INTERVAL_TIME)
 			{
-				//printf("start: %d  end: %d\n",StartTimeStamp,EndTimeStamp);
 				record_list->StartTimeStamp = StartTimeStamp;
 				record_list->EndTimeStamp	= EndTimeStamp;
 				return (char*)pre_indexList;
@@ -3151,7 +3195,7 @@ char* Mux_RefreshRecordList(unsigned int reference_time,char* lastFd,RECORD_LIST
 			EndTimeStamp = pre_indexList->fileInfo.recordEndTimeStamp;
 		}
 	}
-	printf("find out all new file!!!!!!!!!\n");
+	LOGI_print("find out all new file!");
 	record_list->StartTimeStamp = StartTimeStamp;
 	record_list->EndTimeStamp	= EndTimeStamp;
 	return NULL;
@@ -3162,10 +3206,12 @@ char* Mux_RefreshAlarmRecordList(unsigned int reference_time,char* lastFd,RECORD
 {
 	if(RemoveSdFlag == 1)
 	{
+		LOGE_print("error status, RemoveSdFlag:%d", RemoveSdFlag);
 		return NULL;
 	}
 	if(gAVIndexList == NULL || reference_time <= 0)
 	{
+		LOGE_print("gAVIndexList:%p reference_time:%d", gAVIndexList, reference_time);
 		return NULL;
 	}
 
@@ -3188,6 +3234,7 @@ char* Mux_RefreshAlarmRecordList(unsigned int reference_time,char* lastFd,RECORD
 		pre_indexList = Get_Oldest_file();
 		if(pre_indexList == NULL)
 		{
+			LOGE_print("pre_indexList == NULL");
 			return NULL;
 		}
 		for(lAviCount;lAviCount < IndexSum;lAviCount++)
@@ -3207,7 +3254,7 @@ char* Mux_RefreshAlarmRecordList(unsigned int reference_time,char* lastFd,RECORD
 		
 		if(lAviCount == IndexSum)
 		{
-			printf("there is no new alarm record file. return 0.\n");
+			LOGE_print("there is no new alarm record file. return 0");
 			return NULL;
 		}
 	}
@@ -3216,6 +3263,7 @@ char* Mux_RefreshAlarmRecordList(unsigned int reference_time,char* lastFd,RECORD
 		pre_indexList = (GosIndex*)lastFd;//Get_Index_Form_fd(lastFd);
 		if(pre_indexList == NULL)
 		{
+			LOGE_print("pre_indexList == NULL");
 			return NULL;
 		}
 	}
@@ -3244,7 +3292,7 @@ char* Mux_RefreshAlarmRecordList(unsigned int reference_time,char* lastFd,RECORD
 				{
 					break;
 				}
-				printf("skip curr indext, return next indext.\n");
+				printf("skip curr indext, return next indext.");
 				record_list->StartTimeStamp = StartTimeStamp;
 				record_list->EndTimeStamp = EndTimeStamp;
 				record_list->AlarmType		= AlarmType;
@@ -3259,7 +3307,6 @@ char* Mux_RefreshAlarmRecordList(unsigned int reference_time,char* lastFd,RECORD
 			}
 			if((pre_indexList->fileInfo.recordStartTimeStamp - EndTimeStamp) > MAX_INTERVAL_TIME || pre_indexList->fileInfo.alarmType != AlarmType)
 			{
-				//printf("start: %d  end: %d\n",StartTimeStamp,EndTimeStamp);
 				record_list->StartTimeStamp = StartTimeStamp;
 				record_list->EndTimeStamp	= EndTimeStamp;
 				record_list->AlarmType		= AlarmType;
@@ -3268,7 +3315,7 @@ char* Mux_RefreshAlarmRecordList(unsigned int reference_time,char* lastFd,RECORD
 			EndTimeStamp = pre_indexList->fileInfo.recordEndTimeStamp;
 		}
 	}
-	printf("find out all file!!!!!!!!!\n");
+	LOGI_print("find out all file!!");
 	record_list->StartTimeStamp = StartTimeStamp;
 	record_list->EndTimeStamp	= EndTimeStamp;
 	record_list->AlarmType		= AlarmType;
@@ -3280,6 +3327,7 @@ int Mux_SetLastFileAlarmType(char *CurrFp,int AlarmType,int flag)
 {
 	if(RemoveSdFlag == 1)
 	{
+		LOGE_print("error status, RemoveSdFlag:%d", RemoveSdFlag);
 		return -1;
 	}
 	if(gAVIndexList == NULL)
@@ -3307,7 +3355,7 @@ int Mux_SetLastFileAlarmType(char *CurrFp,int AlarmType,int flag)
 	if(flag == 0)
 	{
 		pGos_indexList->fileInfo.alarmType = AlarmType;
-		printf("[record lib]: currfd -> %d , alarm type - > %d\n",pGos_Last_indexList->fileInfo.fileIndex,pGos_Last_indexList->fileInfo.alarmType);
+		LOGI_print("[record lib]: currfd -> %d , alarm type - > %d",pGos_Last_indexList->fileInfo.fileIndex,pGos_Last_indexList->fileInfo.alarmType);
 		return 0;
 	}
 	else
@@ -3315,7 +3363,7 @@ int Mux_SetLastFileAlarmType(char *CurrFp,int AlarmType,int flag)
 		if(pGos_indexList->fileInfo.recordStartTimeStamp - pGos_Last_indexList->fileInfo.recordEndTimeStamp <= MAX_INTERVAL_TIME)
 		{
 			pGos_Last_indexList->fileInfo.alarmType = AlarmType;
-			printf("[record lib]: lastfd -> %d , alarm type - > %d\n",pGos_Last_indexList->fileInfo.fileIndex,pGos_Last_indexList->fileInfo.alarmType);
+			LOGI_print("[record lib]: lastfd -> %d , alarm type - > %d",pGos_Last_indexList->fileInfo.fileIndex,pGos_Last_indexList->fileInfo.alarmType);
 			return 0;
 		}
 	}
@@ -3328,6 +3376,7 @@ int Mux_SetTimeStamp(char* fd,unsigned int start_or_end,unsigned int time_stamp)
 {
 	if(RemoveSdFlag == 1)
 	{
+		LOGE_print("error status, RemoveSdFlag:%d", RemoveSdFlag);
 		return -1;
 	}
 	if(gAVIndexList == NULL)
@@ -3370,7 +3419,7 @@ unsigned int Mux_Get_Oldest_Time()
 	GosIndex* pGos_indexList = Get_Oldest_file();
 	if(pGos_indexList == NULL)
 	{
-		printf("do not find Oldest Time!!!\n");
+		LOGE_print("do not find Oldest Time!!!");
 		return 0;
 	}
 	return pGos_indexList->fileInfo.recordStartTimeStamp;
@@ -3394,13 +3443,13 @@ void *Gos_DiskManager_proc(void *p)
 	{
 		if(FormatSdFlag == 1)
 		{
-			printf("is formatting sd !!!!\n");
+			LOGW_print("is formatting sd !!");
 			sleep(1);
 			continue;
 		}
 		if(!CheckSdIsMount())
-		//if(!StorageCheckSDExist())
 		{
+			LOGW_print("IsMoun=false, fPart:%d", fPart);
 			RemoveSdFlag = 1;
 			if (fPart > 0 )
 			{
@@ -3418,7 +3467,7 @@ void *Gos_DiskManager_proc(void *p)
 			if((Flagfp = fopen(flagFileName,"r+")) != NULL)
 			{
 				fclose(Flagfp);
-				printf("SD Find 1q2w3e4r5t.dat exist,Don't to predistribution!!!\n");
+				LOGW_print("SD Find 1q2w3e4r5t.dat exist,Don't to predistribution!!");
 			}
 			else
 			{

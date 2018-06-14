@@ -147,15 +147,8 @@ typedef struct msdos_boot_sector//512个字节
 
 //////////////////////////////////////////////////////////////////////////////////
 
-#define LONG_MSDOS_DIR_SUPPORT 1   //支持长文件名
-
-#if LONG_MSDOS_DIR_SUPPORT
 //当前最大支持26个字符的长文件名(fat32最多支持255个字符，可扩容)
 #define LONG_DIR_ITEM_SIZE     	(32*3)  
-#else
-#define LONG_DIR_ITEM_SIZE     	 32
-#endif
-
 #ifdef __cplusplus
 extern "C"{
 #endif
