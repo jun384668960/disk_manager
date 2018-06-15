@@ -203,7 +203,6 @@ void CreateLongFileItem(long_msdos_dir_entry *de,unsigned char *shortname,
 void Storage_Lock()
 {
 	cmtx_enter(LockFlag);
-
 }
 
 void Storage_Unlock()
@@ -1412,6 +1411,134 @@ int StorageDeleteFile(int Fileindex)
 	return 0;
 }
 
+int StorageFatUpdate(int fpart, GosIndex* index)
+{
+	int i;
+	__u64 fatOffset;
+	
+	//更新FAT
+	LONG len = index->fileInfo.fileSize;
+	int cuCount = len / (gHeadIndex.ClusterSize*DEFAULT_SECTOR_SIZE); //这个文件占的簇数
+	int allCount = FILE_MAX_LENTH/(gHeadIndex.ClusterSize*DEFAULT_SECTOR_SIZE);
+	if(len % (gHeadIndex.ClusterSize * DEFAULT_SECTOR_SIZE) != 0)
+	{
+		cuCount += 1;  //不整除,分配多一簇
+	}
+	if(FILE_MAX_LENTH % (gHeadIndex.ClusterSize * DEFAULT_SECTOR_SIZE) != 0)
+	{
+		allCount +=1;  //不整除,分配多一簇
+	}
+	if(cuCount > allCount) //此情况不存在，write的时候已经保证不超出
+	{
+		LOGE_print("cuCount:%d > allCount:%d", cuCount, allCount);
+		return -1;	 //文件长度大于预分配文件大小
+	}
+	
+	int *pfat = NULL;
+	if((pfat = (int *)malloc(allCount*sizeof(int))) == NULL)
+	{
+		LOGE_print("malloc error");
+		return -1;
+	}
+	memset(pfat,0,allCount*sizeof(int));
+	int *ptmp = &pfat[0];
+	for(i=0; i<allCount; i++)
+	{
+		if(i==0 || i==cuCount)
+		{
+			*ptmp = 0XFFFFFFFF; // 1号表项
+		}
+		else if(i==cuCount)
+		{
+			*ptmp = 0X0FFFFFFF; // 文件结束于该簇
+		}
+		else
+		{
+			*ptmp = index->startCluster + i;
+		}	
+		ptmp++;
+	}
+	
+	Storage_Lock();
+	fatOffset = index->CluSectorsNum * DEFAULT_SECTOR_SIZE + index->CluSectorsEA;
+	lseek64(fpart, fatOffset, SEEK_SET);
+	if(write(fpart,(char *)pfat,allCount*sizeof(int)) != allCount*sizeof(int))
+	{
+		free(pfat);
+		pfat = NULL;
+		ptmp = NULL;
+		Storage_Unlock();
+		LOGE_print("write pfat error");
+		return	-1;
+	}
+	free(pfat);
+	pfat = NULL;
+	ptmp = NULL;
+	Storage_Unlock();
+
+	return 0;
+}
+
+
+int StorageDirEntryUpdate(int fpart, GosIndex* index, char *fileName)
+{
+	//更新目录结构
+	struct long_msdos_dir_entry dir_entry; 
+	char longName[25] = {0};
+	char shortname[11] = {0};
+	unsigned long start;
+	__u64 fatOffset;
+
+	if(fileName != NULL)
+	{
+		int tm_year,tm_mon,tm_mday;
+		int tm_hour,tm_min,tm_sec;
+		char zero;
+		char filetype[32] = {0};
+		char alarmtype;
+	
+		sscanf(fileName,"%04d%02d%02d%02d%02d%02d%c%c%s",&tm_year,&tm_mon,&tm_mday,&tm_hour,
+			&tm_min,&tm_sec,&zero,&alarmtype,filetype);
+	
+		unsigned int ltime = tm_hour * 2048 + tm_min * 32 + tm_sec/2;
+		unsigned int ldate = (tm_year - 1980) * 512 + tm_mon * 32 + tm_mday; 
+		Storage_Lock();
+		index->fileInfo.recordStartTime = ltime & 0xffff;
+		index->fileInfo.recordStartDate = ldate & 0xffff;
+		index->fileInfo.alarmType = alarmtype - 'a';
+		Storage_Unlock();
+		sprintf(fileName,"%04d%02d%02d%02d%02d%02d0%c.H264",tm_year,tm_mon,tm_mday,tm_hour,tm_min,(tm_sec/2)*2,index->fileInfo.alarmType+'a');
+		strcpy(longName,fileName);
+		LOGI_print("close filename %s",fileName);
+	}
+
+	sprintf(shortname,"%06d%s", index->fileInfo.fileIndex, "~1DAT");
+	start = index->startCluster;
+	CreateLongFileItem(&dir_entry, shortname, longName, start, FILE_MAX_LENTH, gHeadIndex.ClusterSize, 0x20);
+	
+	dir_entry.dir_entry.time = index->fileInfo.recordStartTime;
+	dir_entry.dir_entry.date = index->fileInfo.recordStartDate;
+	dir_entry.dir_entry.ctime = dir_entry.dir_entry.time;
+	dir_entry.dir_entry.cdate = dir_entry.dir_entry.date;
+	dir_entry.dir_entry.adate = dir_entry.dir_entry.date;
+	dir_entry.dir_entry.starthi = CT_LE_W(index->startCluster>>16);
+	dir_entry.dir_entry.start = CT_LE_W(index->startCluster&0xffff);
+	dir_entry.dir_entry.size = index->fileInfo.fileSize;
+
+	Storage_Lock();
+	fatOffset = index->DirSectorsNum * DEFAULT_SECTOR_SIZE + index->DirSectorsEA;
+	lseek64(fpart, fatOffset, SEEK_SET);
+	if(write(fpart,&dir_entry,sizeof(long_msdos_dir_entry)) != sizeof(long_msdos_dir_entry))
+	{
+		Storage_Unlock();
+		LOGE_print("write dir_entry error");
+		return -1;
+	}
+	Storage_Unlock();
+
+	return 0;
+}
+
 #define WitchList() 								\
 {													\
 	if(FileType == RECORD_FILE_MP4)    				\
@@ -1578,243 +1705,95 @@ int Storage_Close_All()
 //寻找可写文件的索引号(文件句柄)
 char* Storage_Open(const char *fileName)
 {
-	if(RemoveSdFlag == 1)
-	{
-		LOGE_print("error status, RemoveSdFlag:%d", RemoveSdFlag);
-		return NULL;
-	}
-
-	int lAviCount;
-	int IndexSum;
 	int tm_year,tm_mon,tm_mday;
 	int tm_hour,tm_min,tm_sec;
 	char zero;
-	//char recordtype;
 	char alarmtype;
-	//int fileduration;
 	char filetype[32] = {0};
 
-	if(!CheckSdIsMount())
+	Storage_Lock();
+	GosIndex* handle_index;
+	//是否回环，否则取下一个index
+	if(gHeadIndex.CurrIndexPos >= gHeadIndex.lRootDirFileNum-1)
 	{
-		LOGE_print("SdIsMount false");
-		return NULL;
-	}
-	if(NULL == gAVIndexList || NULL == fileName || (!StorageCheckSDExist()))
-	{
-		LOGE_print("gAVIndexList:%p fileName:%p or SDExist false", gAVIndexList, fileName);
-		return NULL;
-	}
-
-	setMaxWriteSize(0);
-
-
-	struct GosIndex *pGos_indexList;
-	enum RECORD_FILE_TYPE FileType;
-	sscanf(fileName,"%04d%02d%02d%02d%02d%02d%c%c%s",&tm_year,&tm_mon,&tm_mday,&tm_hour,
-		&tm_min,&tm_sec,&zero,/*&recordtype,*/&alarmtype,filetype);
-
-	pGos_indexList = &gAVIndexList[1];
-	IndexSum = gHeadIndex.lRootDirFileNum;
-	lAviCount = 1;
-	FileType = RECORD_FILE_H264;
-
-
-	if(gHeadIndex.CurrIndexPos == 0 || gHeadIndex.CurrIndexPos >=gHeadIndex.lRootDirFileNum-1)
-	{
-		pGos_indexList = &gAVIndexList[1];
+		handle_index = &gAVIndexList[1];
 	}
 	else
 	{
-		pGos_indexList = &gAVIndexList[gHeadIndex.CurrIndexPos+1];
+		handle_index = &gAVIndexList[gHeadIndex.CurrIndexPos+1];
 	}
+
+	sscanf(fileName,"%04d%02d%02d%02d%02d%02d%c%c%s",&tm_year,&tm_mon,&tm_mday,&tm_hour,
+		&tm_min,&tm_sec,&zero,&alarmtype,filetype);
 	unsigned int ltime = tm_hour * 2048 + tm_min * 32 + tm_sec/2;
 	unsigned int ldate = (tm_year - 1980) * 512 + tm_mon * 32 + tm_mday; 
-	pGos_indexList->fileInfo.recordStartTime = ltime & 0xffff;
-	pGos_indexList->fileInfo.recordStartDate = ldate & 0xffff;
-	pGos_indexList->fileInfo.filestate = OCCUPATION;
-	pGos_indexList->fileInfo.FileFpart = 0;
-	pGos_indexList->DataSectorsEA = 0;
-	oldStartTimeStap = pGos_indexList->fileInfo.recordStartTimeStamp;
-	oldEndTimeStap   = pGos_indexList->fileInfo.recordEndTimeStamp;
-	LOGI_print("open DiskFd=%d",pGos_indexList->fileInfo.fileIndex);
-	return (char*)pGos_indexList;
+
+	//初始化index属性
+	handle_index->fileInfo.recordStartTime = ltime & 0xffff;
+	handle_index->fileInfo.recordStartDate = ldate & 0xffff;
+	handle_index->fileInfo.filestate = OCCUPATION;
+	handle_index->fileInfo.FileFpart = 0;
+	handle_index->DataSectorsEA = 0;
+
+	//更新全局标志
+	oldStartTimeStap = handle_index->fileInfo.recordStartTimeStamp;
+	oldEndTimeStap   = handle_index->fileInfo.recordEndTimeStamp;
+	gHeadIndex.CurrIndexPos = handle_index->fileInfo.fileIndex;
+	Storage_Unlock();
+	
+	LOGI_print("open CurrIndexPos DiskFd index=%d",handle_index->fileInfo.fileIndex);
+	return (char*)handle_index;
 }
 
 //更新fat表,目录以及索引
 int Storage_Close(char* Fileindex,char *fileName,int fpart)
 {	
-	if(RemoveSdFlag == 1)
-	{
-		LOGE_print("error status, RemoveSdFlag:%d", RemoveSdFlag);
-		return -1;
-	}
-
 	__u64 fatOffset;
-	int maxFileSize = 0;
-	int lAviCount;
-	unsigned int nlen = 0;
-	unsigned int fileoffset = 0;
-	int IndexSum;
-	enum RECORD_FILE_TYPE FileType;
-	int tm_year,tm_mon,tm_mday;
-	int tm_hour,tm_min,tm_sec;
-	char zero;
-	//int fileduration;
-	char filetype[32] = {0};
-	//char recordtype;
-	char alarmtype;
-	if(Fileindex ==NULL)
+	int ret;
+	do
 	{
-		LOGE_print("Fileindex ==NULL");
-		return -1;
-	}
-	if(!CheckSdIsMount())
-	{
-		LOGE_print("SdIsMount false");
-		return -1;
-	}
+		GosIndex* handle_index = (GosIndex*)Fileindex;
 
-	if( NULL == gAVIndexList || (!StorageCheckSDExist()))
-	{
-		LOGE_print("gAVIndexList:%p or SDExist false", gAVIndexList);
-		return -1;
-	}
-	
-	setMaxWriteSize(0);
-	
-	struct GosIndex *pGos_indexList;
-
-	pGos_indexList = gAVIndexList;
-	maxFileSize = FILE_MAX_LENTH;
-	IndexSum = gHeadIndex.lRootDirFileNum;
-	lAviCount = 0;
-	FileType = RECORD_FILE_H264;
-
-	pGos_indexList = (GosIndex*)Fileindex;
-	pGos_indexList->fileInfo.FileFpart = 0;  //文件连续读写结束了
-	pGos_indexList->DataSectorsEA = 0;
-	
-	if(pGos_indexList->fileInfo.recordStartTimeStamp == oldStartTimeStap 
-		|| pGos_indexList->fileInfo.recordEndTimeStamp == oldEndTimeStap
-		|| pGos_indexList->fileInfo.recordStartTimeStamp <= 1514736000
-		|| pGos_indexList->fileInfo.recordEndTimeStamp <= 1514736000) //时间小于2010年1月1日
-	{
-		LOGE_print("record file timestap error[%d,%d]",pGos_indexList->fileInfo.recordStartTimeStamp
-			,pGos_indexList->fileInfo.recordEndTimeStamp);
-		pGos_indexList->fileInfo.filestate = NON_EMPTY_OK;
-		return -1;
-	}
-
-	LONG len = pGos_indexList->fileInfo.fileSize;
-	int cuCount = len / (gHeadIndex.ClusterSize*DEFAULT_SECTOR_SIZE); //这个文件占的簇数
-	int allCount = maxFileSize/(gHeadIndex.ClusterSize*DEFAULT_SECTOR_SIZE);
-	if(len % (gHeadIndex.ClusterSize * DEFAULT_SECTOR_SIZE) != 0)
-	{
-		cuCount += 1;  //不整除,分配多一簇
-	}
-	if(maxFileSize % (gHeadIndex.ClusterSize * DEFAULT_SECTOR_SIZE) != 0)
-	{
-		allCount +=1;  //不整除,分配多一簇
-	}
-	if(cuCount > allCount)
-	{
-		LOGE_print("cuCount:%d > allCount:%d", cuCount, allCount);
-		return -1;   //文件长度大于预分配文件大小
-	}
-	fatOffset = pGos_indexList->CluSectorsNum * DEFAULT_SECTOR_SIZE + pGos_indexList->CluSectorsEA;
-
-	int *pfat = NULL;
-	if((pfat = (int *)malloc(allCount*sizeof(int))) == NULL)
-	{
-		LOGE_print("malloc error");
-		return -1;
-	}
-	memset(pfat,0,allCount*sizeof(int));
-	int *ptmp = &pfat[0];
-	for(lAviCount = 0;lAviCount < allCount;lAviCount++)
-	{
-		if(lAviCount==0||lAviCount==cuCount)
+		if(handle_index->fileInfo.recordStartTimeStamp == oldStartTimeStap 
+			|| handle_index->fileInfo.recordEndTimeStamp == oldEndTimeStap
+			|| handle_index->fileInfo.recordStartTimeStamp <= 1514736000
+			|| handle_index->fileInfo.recordEndTimeStamp <= 1514736000) //时间小于2010年1月1日
 		{
-			*ptmp = 0XFFFFFFFF;
+			LOGE_print("record file timestap error[%d,%d]",handle_index->fileInfo.recordStartTimeStamp
+				,handle_index->fileInfo.recordEndTimeStamp);
+			Storage_Lock();
+			handle_index->fileInfo.filestate = WRITE_OK;
+			Storage_Unlock();
+			break;
 		}
-		else
+
+		ret = StorageFatUpdate(fpart, handle_index);
+		if(ret != 0)
 		{
-			*ptmp = pGos_indexList->startCluster+lAviCount;
-		}	
-		ptmp++;
-	}
-	
-	Storage_Lock();
-	lseek64(fpart,fatOffset,SEEK_SET);
-	if(write(fpart,(char *)pfat,allCount*sizeof(int)) != allCount*sizeof(int))
-	{
-		free(pfat);
-		pfat = NULL;
-		ptmp = NULL;
+			LOGE_print("StorageFatUpdate error");
+			break;
+		}
+		ret = StorageDirEntryUpdate(fpart, handle_index, fileName);
+		if(ret != 0)
+		{
+			LOGE_print("StorageDirEntryUpdate error");
+			break;
+		}
+		
+		//更新索引
+		Storage_Lock();
+		handle_index->fileInfo.FileFpart = 0;  //文件连续读写结束了
+		handle_index->DataSectorsEA = 0;
+		handle_index->fileInfo.filestate = NON_EMPTY_OK;
 		Storage_Unlock();
-		LOGE_print("write pfat error");
-		return  -1;
-	}
-	free(pfat);
-	pfat = NULL;
-	ptmp = NULL;
-	Storage_Unlock();
-	
-	struct long_msdos_dir_entry dir_entry; 
-	//int tm_year = 0,tm_mon = 0,tm_mday = 0;
-	//int tm_hour = 0,tm_min = 0,tm_sec = 0;
-	char longName[25] = {0};
-	char shortname[11] = {0};
-	unsigned long start;
+		
+		Storage_Write_gos_index(fpart, RECORD_FILE_H264);
+		sync();
+		
+		return 0;
+	}while(0);
 
-	if(fileName != NULL)
-	{
-		sscanf(fileName,"%04d%02d%02d%02d%02d%02d%c%c%s",&tm_year,&tm_mon,&tm_mday,&tm_hour,
-			&tm_min,&tm_sec,&zero,/*&recordtype,*/&alarmtype/*,&fileduration*/,filetype);
-	
-		unsigned int ltime = tm_hour * 2048 + tm_min * 32 + tm_sec/2;
-		unsigned int ldate = (tm_year - 1980) * 512 + tm_mon * 32 + tm_mday; 
-		pGos_indexList->fileInfo.recordStartTime = ltime & 0xffff;
-		pGos_indexList->fileInfo.recordStartDate = ldate & 0xffff;
-		pGos_indexList->fileInfo.alarmType = alarmtype - 'a';
-
-		sprintf(fileName,"%04d%02d%02d%02d%02d%02d0%c.H264",tm_year,tm_mon,tm_mday,tm_hour,tm_min,(tm_sec/2)*2,pGos_indexList->fileInfo.alarmType+'a');
-		LOGI_print("close filename %s",fileName);
-		strcpy(longName,fileName);
-	}
-
-	sprintf(shortname,"%06d%s",pGos_indexList->fileInfo.fileIndex,"~1DAT");
-	start = pGos_indexList->startCluster;
-	CreateLongFileItem(&dir_entry,shortname,longName,start,FILE_MAX_LENTH,gHeadIndex.ClusterSize,0x20);
-	
-	dir_entry.dir_entry.time = pGos_indexList->fileInfo.recordStartTime;
-	dir_entry.dir_entry.date = pGos_indexList->fileInfo.recordStartDate;
-	dir_entry.dir_entry.ctime = dir_entry.dir_entry.time;
-	dir_entry.dir_entry.cdate = dir_entry.dir_entry.date;
-	dir_entry.dir_entry.adate = dir_entry.dir_entry.date;
-	dir_entry.dir_entry.starthi = CT_LE_W(pGos_indexList->startCluster>>16);
-	dir_entry.dir_entry.start = CT_LE_W(pGos_indexList->startCluster&0xffff);
-	dir_entry.dir_entry.size = pGos_indexList->fileInfo.fileSize;
-
-	Storage_Lock();
-	fatOffset = pGos_indexList->DirSectorsNum * DEFAULT_SECTOR_SIZE + pGos_indexList->DirSectorsEA;
-	lseek64(fpart,fatOffset,SEEK_SET);
-	if(write(fpart,&dir_entry,sizeof(long_msdos_dir_entry)) != sizeof(long_msdos_dir_entry))
-	{
-		Storage_Unlock();
-		LOGE_print("write dir_entry error");
-		return -1;
-	}
-	Storage_Unlock();
-	
-	//更新索引
-	pGos_indexList->fileInfo.filestate = NON_EMPTY_OK;
-	gHeadIndex.CurrIndexPos = pGos_indexList->fileInfo.fileIndex;
-
-	Storage_Write_gos_index(fpart,FileType);
-	sync();
-	
-	return 0;
+	return -1;
 }
 
 //读磁盘数据
@@ -1889,105 +1868,46 @@ int Storage_Read(char* Fileindex,int offset,void *data,int dataSize,int fpart)
 //写磁盘数据
 int Storage_Write(char* Fileindex,const void *data,unsigned int dataSize,int fpart)
 {
-	if(RemoveSdFlag == 1)
-	{
-		LOGE_print("error status, RemoveSdFlag:%d", RemoveSdFlag);
-		return -1;
-	}
-
-	if(Fileindex == NULL)
-	{
-		LOGE_print("error!! Fileindex is null");
-		return -1;
-	}
-	int lAviCount;
-	unsigned int nlen = 0;
-	unsigned int fileoffset = 0;
-	int IndexSum;
-	int MaxFileSize = 0;
-
 	//根据索引值找到对应文件的磁盘位置,然后写入
-	
-	struct GosIndex *pGos_indexList;
+	GosIndex* handle_index = (GosIndex*)Fileindex;
 
-	if(NULL == gAVIndexList || (!StorageCheckSDExist()))
+	do
 	{
-		LOGE_print("gAVIndexList:%p or SDExist false", gAVIndexList);
-		return -1;
-	}
-	pGos_indexList = gAVIndexList;
-	IndexSum = gHeadIndex.lRootDirFileNum;
-	lAviCount = 0;
-	MaxFileSize = FILE_MAX_LENTH;
+		Storage_Lock();
+		//判断是否连续写入，否则重置写偏移
+		if(handle_index->fileInfo.FileFpart == 0)
+		{
+			handle_index->fileInfo.fileSize = 0;
+			handle_index->DataSectorsEA = handle_index->DataSectorsNum * DEFAULT_SECTOR_SIZE;
+			handle_index->fileInfo.FileFpart = 1;
+		}
+		
+		//文件的长度不能超过预分配给每个文件的大小 
+		if((handle_index->fileInfo.fileSize + dataSize) > FILE_MAX_LENTH)
+		{
+			LOGE_print("error fileSize:%d + dataSize:%d > maxfilesize:%d", handle_index->fileInfo.fileSize, dataSize, FILE_MAX_LENTH);
+			break;
+		}
 
-	if(gAVIndexList == NULL)
-	{
-		LOGE_print("gAVIndexList == NULL");
-		return -1;
-	}
-	
-	pGos_indexList = (GosIndex*)Fileindex;
-	//连续写入
-	if(pGos_indexList->fileInfo.FileFpart == 0)
-	{
-		pGos_indexList->fileInfo.fileSize = 0;
-		pGos_indexList->DataSectorsEA = pGos_indexList->DataSectorsNum * DEFAULT_SECTOR_SIZE;
-	}
-	pGos_indexList->fileInfo.FileFpart = 1;
-	
-	//文件的长度不能超过预分配给每个文件的大小 
-	if((pGos_indexList->fileInfo.fileSize + dataSize) > MaxFileSize)
-	{
-		LOGE_print("error fileSize:%d + dataSize:%d > maxfilesize:%d", pGos_indexList->fileInfo.fileSize, dataSize, MaxFileSize);
-		return -1;
-	}
+		//写内容
+		lseek64(fpart, handle_index->DataSectorsEA, SEEK_SET);
+		unsigned int nlen = write(fpart, (char*)data, dataSize);
+		if(nlen < 0 || nlen != dataSize)
+		{
+			LOGE_print("write error nlen = %d dataSize:%d", nlen, dataSize);
+			break;
+		}
 
-	if(gAVIndexList == NULL)
-	{
-		LOGE_print("gAVIndexList == NULL");
-		return -1;
-	}
+		//更新写地址和当前文件长度
+		handle_index->DataSectorsEA += nlen;
+		handle_index->fileInfo.fileSize += nlen;
 
-	//加锁
-	Storage_Lock();
-	lseek64(fpart,pGos_indexList->DataSectorsEA,SEEK_SET);
-	nlen = write(fpart,(char *)data,dataSize);
-	Storage_Unlock();
-
-	
-	if(gAVIndexList == NULL)
-	{
-		LOGE_print("gAVIndexList == NULL");
-		return -1;
-	}
-
-	if(nlen < 0 || nlen != dataSize)
-	{
-		LOGE_print("write error nlen = %d dataSize:%d", nlen, dataSize);
+		Storage_Unlock();
 		return nlen;
-	}
-	pGos_indexList->DataSectorsEA += nlen;
+	}while(0);
 
-	unsigned long long beyondSize;
-	beyondSize = pGos_indexList->DataSectorsEA - pGos_indexList->DataSectorsNum * DEFAULT_SECTOR_SIZE;
-	if(beyondSize > pGos_indexList->fileInfo.fileSize)
-	{
-		pGos_indexList->fileInfo.fileSize += (beyondSize - pGos_indexList->fileInfo.fileSize); 
-	}
-
-	int max_len = MaxFileSize - 512 * 1024;
-	if(max_len <= 0)
-	{
-		LOGE_print("error max_len :%d", max_len);
-		return -1;
-	}
-	if((pGos_indexList->fileInfo.fileSize + dataSize) > max_len)
-	{
-		setMaxWriteSize(1);
-	}
-
-	pGos_indexList = NULL;
-	return nlen;
+	Storage_Unlock();
+	return -1;
 }
 
 long long Storage_Lseek(int Fileindex,unsigned int offset,unsigned int whence,int fpart)
@@ -2650,16 +2570,32 @@ unsigned int GetDiskInfo_Usable()
 
 char* Mux_open(const char *fileName)
 {
+	if(fileName == NULL || RemoveSdFlag == 1)
+	{
+		LOGE_print("fileName:%p RemoveSdFlag:%d", fileName, RemoveSdFlag);
+		return NULL;
+	}
 	return Storage_Open(fileName);
 }
 
 int Mux_close(char* Fileindex,char *fileName)
 {
+	if(Fileindex == NULL || fileName == NULL || RemoveSdFlag == 1)
+	{
+		LOGE_print("Fileindex:%p fileName:%p RemoveSdFlag:%d", Fileindex, fileName, RemoveSdFlag);
+		return -1;
+	}
 	return Storage_Close(Fileindex,fileName,fPart);
 }
 
 int Mux_write(char* Fileindex,const void *data,unsigned int dataSize)
-{
+{	
+	if(Fileindex == NULL || data == NULL || dataSize <= 0 || RemoveSdFlag == 1)
+	{
+		LOGE_print("Fileindex:%p data:%p dataSize:%d RemoveSdFlag:%d", Fileindex, data, dataSize, RemoveSdFlag);
+		return -1;
+	}
+	
 	return 	Storage_Write(Fileindex,data,dataSize,fPart);
 }
 
@@ -3381,19 +3317,13 @@ int Mux_SetTimeStamp(char* fd,unsigned int start_or_end,unsigned int time_stamp)
 		return -1;
 	}
 
-	int lAviCount = 1;
-	int IndexSum = 0;;
-	GosIndex *indexList; 
-	IndexSum = gHeadIndex.lRootDirFileNum;
-	indexList = &gAVIndexList[1];
-
 	if(fd == NULL || (start_or_end!=0 && start_or_end!=1) || time_stamp<=0)
 	{
 		return -1;
 	}
 	
-	indexList = (GosIndex*)fd;
-	
+	GosIndex* indexList = (GosIndex*)fd;
+	Storage_Lock();
 	if(start_or_end == 1)
 	{
 		indexList->fileInfo.recordStartTimeStamp = time_stamp;
@@ -3402,6 +3332,7 @@ int Mux_SetTimeStamp(char* fd,unsigned int start_or_end,unsigned int time_stamp)
 	{
 		indexList->fileInfo.recordEndTimeStamp = time_stamp;
 	}
+	Storage_Unlock();
 	
 	return 0;
 }
@@ -3433,7 +3364,6 @@ void *Gos_DiskManager_proc(void *p)
 	int flagInit = 1;
 	RemoveSdFlag = 0;
 	FormatSdFlag = 0;
-	FILE* file_fd = NULL;
 	FILE *Flagfp;	
 	char flagFileName[128] = {0};
 	LockFlag = cmtx_create();

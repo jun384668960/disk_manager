@@ -282,6 +282,14 @@ typedef struct HeadIndex   //索引头
 	__u8  ClusterSize;              //簇的单位(扇区/簇)
 }HeadIndex;
 
+//////////////////////////////////////////////////////////////////
+enum SDCARD_STATUS_E
+{
+	SD_FORMATING = 0,
+	SD_FORMATED,
+	SD_UMOUNT,
+	SD_MOUNT,
+};
 
 #ifdef __cplusplus
 }
