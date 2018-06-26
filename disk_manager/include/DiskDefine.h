@@ -285,10 +285,11 @@ typedef struct HeadIndex   //索引头
 //////////////////////////////////////////////////////////////////
 enum SDCARD_STATUS_E
 {
-	SD_FORMATING = 0,
-	SD_FORMATED,
-	SD_UMOUNT,
-	SD_MOUNT,
+	SD_FORMATED = 0,	//格式化完成
+	SD_FORMATING,		//正在格式化
+	SD_UMOUNT,			//卸载
+	SD_MOUNT,			//挂载
+	SD_RELEASED,		//索引列表被释放
 };
 
 #ifdef __cplusplus

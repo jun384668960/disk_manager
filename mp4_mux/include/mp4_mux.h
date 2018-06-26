@@ -16,7 +16,7 @@ extern void *Gos_DiskManager_proc(void *p);
 int MP4Mux_Open(const char *filename);
 int MP4Mux_GetVideoInfo(U8* pData, UINT size, UINT framerate, AM_VIDEO_INFO* h264_info);
 ERR MP4Mux_OnInfo (AM_VIDEO_INFO *pvInfo,AM_AUDIO_INFO *paInfo);
-//int MP4Mux_GetRecordTime();
+int MP4Mux_GetRecordTime();
 //int Mux_GetAllRecordFileTime();
 int MP4Mux_WriteVideoData(unsigned char *buf, int framesize, unsigned int timestamp, int frameType);
 int MP4Mux_WriteAudioData(unsigned char *buf, int framesize, unsigned int timestamp);

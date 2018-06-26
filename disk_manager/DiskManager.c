@@ -1459,7 +1459,6 @@ int StorageFatUpdate(int fpart, GosIndex* index)
 		ptmp++;
 	}
 	
-	Storage_Lock();
 	fatOffset = index->CluSectorsNum * DEFAULT_SECTOR_SIZE + index->CluSectorsEA;
 	lseek64(fpart, fatOffset, SEEK_SET);
 	if(write(fpart,(char *)pfat,allCount*sizeof(int)) != allCount*sizeof(int))
@@ -1467,14 +1466,12 @@ int StorageFatUpdate(int fpart, GosIndex* index)
 		free(pfat);
 		pfat = NULL;
 		ptmp = NULL;
-		Storage_Unlock();
 		LOGE_print("write pfat error");
 		return	-1;
 	}
 	free(pfat);
 	pfat = NULL;
 	ptmp = NULL;
-	Storage_Unlock();
 
 	return 0;
 }
@@ -1502,11 +1499,9 @@ int StorageDirEntryUpdate(int fpart, GosIndex* index, char *fileName)
 	
 		unsigned int ltime = tm_hour * 2048 + tm_min * 32 + tm_sec/2;
 		unsigned int ldate = (tm_year - 1980) * 512 + tm_mon * 32 + tm_mday; 
-		Storage_Lock();
 		index->fileInfo.recordStartTime = ltime & 0xffff;
 		index->fileInfo.recordStartDate = ldate & 0xffff;
 		index->fileInfo.alarmType = alarmtype - 'a';
-		Storage_Unlock();
 		sprintf(fileName,"%04d%02d%02d%02d%02d%02d0%c.H264",tm_year,tm_mon,tm_mday,tm_hour,tm_min,(tm_sec/2)*2,index->fileInfo.alarmType+'a');
 		strcpy(longName,fileName);
 		LOGI_print("close filename %s",fileName);
@@ -1525,16 +1520,13 @@ int StorageDirEntryUpdate(int fpart, GosIndex* index, char *fileName)
 	dir_entry.dir_entry.start = CT_LE_W(index->startCluster&0xffff);
 	dir_entry.dir_entry.size = index->fileInfo.fileSize;
 
-	Storage_Lock();
 	fatOffset = index->DirSectorsNum * DEFAULT_SECTOR_SIZE + index->DirSectorsEA;
 	lseek64(fpart, fatOffset, SEEK_SET);
 	if(write(fpart,&dir_entry,sizeof(long_msdos_dir_entry)) != sizeof(long_msdos_dir_entry))
 	{
-		Storage_Unlock();
 		LOGE_print("write dir_entry error");
 		return -1;
 	}
-	Storage_Unlock();
 
 	return 0;
 }
@@ -1752,6 +1744,7 @@ int Storage_Close(char* Fileindex,char *fileName,int fpart)
 	int ret;
 	do
 	{
+		Storage_Lock();
 		GosIndex* handle_index = (GosIndex*)Fileindex;
 
 		if(handle_index->fileInfo.recordStartTimeStamp == oldStartTimeStap 
@@ -1761,9 +1754,8 @@ int Storage_Close(char* Fileindex,char *fileName,int fpart)
 		{
 			LOGE_print("record file timestap error[%d,%d]",handle_index->fileInfo.recordStartTimeStamp
 				,handle_index->fileInfo.recordEndTimeStamp);
-			Storage_Lock();
+			
 			handle_index->fileInfo.filestate = WRITE_OK;
-			Storage_Unlock();
 			break;
 		}
 
@@ -1781,7 +1773,6 @@ int Storage_Close(char* Fileindex,char *fileName,int fpart)
 		}
 		
 		//更新索引
-		Storage_Lock();
 		handle_index->fileInfo.FileFpart = 0;  //文件连续读写结束了
 		handle_index->DataSectorsEA = 0;
 		handle_index->fileInfo.filestate = NON_EMPTY_OK;
@@ -1793,6 +1784,7 @@ int Storage_Close(char* Fileindex,char *fileName,int fpart)
 		return 0;
 	}while(0);
 
+	Storage_Unlock();
 	return -1;
 }
 
