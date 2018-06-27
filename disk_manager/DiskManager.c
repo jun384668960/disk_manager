@@ -1146,65 +1146,78 @@ int Storage_Write_gos_index(int fpart,enum RECORD_FILE_TYPE fileType)
 {
 	unsigned long all_gos_indexSize;
 
-	if( NULL == gAVIndexList || (!StorageCheckSDExist()))
+	do
 	{
-		LOGE_print("gAVIndexList:%p SDExist:0", gAVIndexList);
-		return -1;
-	}
-
-	//写索引头
-	Storage_Lock();
-	lseek64(fpart,gHeadIndex.HeadStartSector * DEFAULT_SECTOR_SIZE,SEEK_SET);
-	if (write(fpart,(char *)(&gHeadIndex), sizeof(HeadIndex)) != (int)sizeof(HeadIndex))
-	{
-		LOGE_print("write gHeadIndex error");
-		return -1;
-	}
-
-    switch(fileType)
-    {
-        case RECORD_FILE_MP4: 
+		if( NULL == gAVIndexList || (!StorageCheckSDExist()))
 		{
-			all_gos_indexSize = sizeof(GosIndex) * gHeadIndex.lRootDirFileNum;
-			if (write(fpart,(char *)(gMp4IndexList), all_gos_indexSize) != (int)all_gos_indexSize)
-			{
-				LOGE_print("write gMp4IndexList error");
-				return -1;
-			}
+			LOGE_print("gAVIndexList:%p SDExist:0", gAVIndexList);
+			return -1;
+		}
+
+		//写索引头
+		Storage_Lock();
+		lseek64(fpart,gHeadIndex.HeadStartSector * DEFAULT_SECTOR_SIZE,SEEK_SET);
+		if (write(fpart,(char *)(&gHeadIndex), sizeof(HeadIndex)) != (int)sizeof(HeadIndex))
+		{
+			LOGE_print("write gHeadIndex error");
 			break;
 		}
-        case RECORD_FILE_JPG: 
-		{
-            all_gos_indexSize = sizeof(GosIndex) * gHeadIndex.lJpegFileNum;
-			lseek64(fpart,gHeadIndex.JpegStartEA,SEEK_SET);
-			if (write(fpart,(char *)(gJpegIndexList), all_gos_indexSize) != (int)all_gos_indexSize)
-			{
-				LOGE_print("write gJpegIndexList error");
-				return -1;
-			}	
-            break;
-		}
-		case RECORD_FILE_H264:
-		{
-            all_gos_indexSize = sizeof(GosIndex) * gHeadIndex.lRootDirFileNum;
-			if (write(fpart,(char *)(gAVIndexList), all_gos_indexSize) != (int)all_gos_indexSize)
-			{
-				LOGE_print("write gAVIndexList error");
-				return -1;
-			}	
-            break;
-		}
 
-        default: 
+		int err = 0;
+	    switch(fileType)
+	    {
+	        case RECORD_FILE_MP4: 
+			{
+				all_gos_indexSize = sizeof(GosIndex) * gHeadIndex.lRootDirFileNum;
+				if (write(fpart,(char *)(gMp4IndexList), all_gos_indexSize) != (int)all_gos_indexSize)
+				{
+					LOGE_print("write gMp4IndexList error");
+					err = 1;;
+				}
+				break;
+			}
+	        case RECORD_FILE_JPG: 
+			{
+	            all_gos_indexSize = sizeof(GosIndex) * gHeadIndex.lJpegFileNum;
+				lseek64(fpart,gHeadIndex.JpegStartEA,SEEK_SET);
+				if (write(fpart,(char *)(gJpegIndexList), all_gos_indexSize) != (int)all_gos_indexSize)
+				{
+					LOGE_print("write gJpegIndexList error");
+					err = 1;;
+				}	
+	            break;
+			}
+			case RECORD_FILE_H264:
+			{
+	            all_gos_indexSize = sizeof(GosIndex) * gHeadIndex.lRootDirFileNum;
+				if (write(fpart,(char *)(gAVIndexList), all_gos_indexSize) != (int)all_gos_indexSize)
+				{
+					LOGE_print("write gAVIndexList error");
+					err = 1;;
+				}	
+	            break;
+			}
+
+	        default: 
+			{
+				LOGE_print("fileType:%d error", fileType);
+				err = 1;;
+			}            
+	    }
+
+		if(err == 1)
 		{
-			LOGE_print("fileType:%d error", fileType);
-			return -1;
-		}            
-    }
+			break;
+		}
+		
+		Storage_Unlock();
+		sync();
+		
+		return 0;
+	}while(0);
+	
 	Storage_Unlock();
-	sync();
-
-	return 0;
+	return -1;
 }
 
 int Storage_Get_File_Size(const char *fileName)
