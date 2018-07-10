@@ -83,7 +83,7 @@ long long Storage_Lseek(int Fileindex,unsigned int offset,unsigned int whence,in
 extern "C"{
 #endif
 
-int fPart;						//磁盘句柄
+int fPart = -1;						//磁盘句柄
 CMtx LockFlag;               	//文件锁
 static int RemoveSdFlag = 0;			//移除sd卡标志
 static int FormatSdFlag = 0;			//格式化sd卡
@@ -406,14 +406,25 @@ int FormatParttion(int fpart, unsigned long filesize, unsigned long lAviNum,unsi
 		int err;
 	
 		err = ioctl( fpart, BLKGETSIZE64, &b );
-	
-		LOGI_print("disk_size=%d errcode=%d",b , err);
-	
-		if ( err || b == 0 || b == sz ) 	   
-			cblocks = sz;		 
-		else			 
+		if(err == 0)
+		{
+			LOGI_print("disk_size=%lld errcode=%d",b , err);
 			cblocks = ( b >> 9 );	//总共扇区数
-
+		}
+		else
+		{
+			err = ioctl(fpart, BLKGETSIZE, &sz);
+			if(err == 0)
+			{
+				LOGI_print("disk_size=%ld errcode=%d",sz , err);
+				cblocks = sz;
+			}
+			else
+			{
+				LOGE_print("get BLKGETSIZE error");
+			}
+		}
+	
 		LOGI_print("cblocks..000...111==%llu",cblocks);	
 		//减去 10M 的空间不分区
 		cblocks -= 10*1024*2; // 1kB = 2个扇区 得到所有需要分区的扇区
@@ -507,7 +518,7 @@ int FormatParttion(int fpart, unsigned long filesize, unsigned long lAviNum,unsi
 	//为cluster_size选择一个合适的值
 	unsigned long  lTotalSectors = (unsigned long) cblocks; 
 
-	LOGI_print("cblocks==%ld  lTotalSectors=%d",cblocks ,lTotalSectors );
+	LOGI_print("cblocks==%lld  lTotalSectors=%lu",cblocks ,lTotalSectors );
 	
 	unsigned long long lFatData = lTotalSectors - DBR_RESERVED_SECTORS;	 //剩余需要分区的扇区个数
 	int maxclustsize = 128;	
@@ -893,7 +904,7 @@ int FormatParttion(int fpart, unsigned long filesize, unsigned long lAviNum,unsi
 	gHeadIndex.ChildItemEA = ppIndex->DirSectorsNum*DEFAULT_SECTOR_SIZE + ppIndex->DirSectorsEA + LONG_DIR_ITEM_SIZE;
 
 	FREE();
-	sync();
+	fsync(fpart);
 
 	LOGI_print( "cblocks..8888 do_success!");
 
@@ -907,7 +918,7 @@ int FormatParttion(int fpart, unsigned long filesize, unsigned long lAviNum,unsi
 		LOGE_print("write gHeadIndex error!!!");
 		return -1;
 	}
-	sync();
+	fsync(fpart);
 
 	return 0;
 }
@@ -1195,6 +1206,15 @@ int Storage_Write_gos_index(int fpart,enum RECORD_FILE_TYPE fileType)
 					LOGE_print("write gAVIndexList error");
 					err = 1;;
 				}	
+//				static FILE* s_pList = NULL;
+//				s_pList = fopen(SDDirName"/index_list", "w");
+//				if(s_pList != NULL) {
+//					size_t wb = fwrite((char*)gAVIndexList, 1, all_gos_indexSize, s_pList);
+//					if(wb != (size_t)all_gos_indexSize)
+//					{
+//						LOGE_print("fwrite gAVIndexList to s_pList error wb:%ld all_gos_indexSize:%lu", wb, all_gos_indexSize);
+//					}
+//				}
 	            break;
 			}
 
@@ -1209,9 +1229,9 @@ int Storage_Write_gos_index(int fpart,enum RECORD_FILE_TYPE fileType)
 		{
 			break;
 		}
-		
+
+		fsync(fpart);
 		Storage_Unlock();
-		sync();
 		
 		return 0;
 	}while(0);
@@ -1446,7 +1466,9 @@ int StorageFatUpdate(int fpart, GosIndex* index)
 		LOGE_print("cuCount:%d > allCount:%d", cuCount, allCount);
 		return -1;	 //文件长度大于预分配文件大小
 	}
-	
+
+	fatOffset = index->CluSectorsNum * DEFAULT_SECTOR_SIZE + index->CluSectorsEA;
+
 	int *pfat = NULL;
 	if((pfat = (int *)malloc(allCount*sizeof(int))) == NULL)
 	{
@@ -1472,7 +1494,6 @@ int StorageFatUpdate(int fpart, GosIndex* index)
 		ptmp++;
 	}
 	
-	fatOffset = index->CluSectorsNum * DEFAULT_SECTOR_SIZE + index->CluSectorsEA;
 	lseek64(fpart, fatOffset, SEEK_SET);
 	if(write(fpart,(char *)pfat,allCount*sizeof(int)) != allCount*sizeof(int))
 	{
@@ -1598,18 +1619,16 @@ int Storage_Init(int mkfs_vfat)
 	unsigned long lLogSizeMtemp = 0;
 	int index_offset = 0;
 	char command[512] = {0};
-	
+
+	Storage_Lock();
 	if(fPart > 0)
 	{
 		LOGW_print("fPart:%d", fPart);
 		close(fPart);
 		fPart = -1;
 	}
-	
-	Storage_Unlock();
-	
 	//FormatSdFlag = 1;
-	
+		
 	int i;
 	for(i=1;i<=4;i++)
 	{
@@ -1663,7 +1682,7 @@ int Storage_Init(int mkfs_vfat)
 		StoragepopenRead(command);
 		//进行预分配	
 		int bRet = FormatParttion(fPart, FILE_MAX_LENTH, lAviNumtemp, lLogSizeMtemp );	
-
+		
 		memset(command,0,sizeof(command));
 		sprintf(command,"mount -t vfat %s %s",szPartName,SDDirName);
 		StoragepopenRead(command);
@@ -1674,6 +1693,7 @@ int Storage_Init(int mkfs_vfat)
 	if ((gAVIndexList = (struct GosIndex *)malloc (all_gos_indexSize)) == NULL)
 	{
 		LOGE_print("unable to allocate space for gAVIndexList in memory");
+		Storage_Unlock();
 		return -1;
 	}
 	LOGI_print("all_gos_indexSize %d",all_gos_indexSize);
@@ -1682,11 +1702,13 @@ int Storage_Init(int mkfs_vfat)
 	
 	FormatSdFlag = 0;
 	LOGI_print( "storage init do_success!!!");
+	Storage_Unlock();
 	return 0;
 }
 
 int Storage_Close_All()
 {
+	Storage_Lock();
 	FormatSdFlag = 1;
 
 	if(fPart > 0)
@@ -1760,6 +1782,9 @@ int Storage_Close(char* Fileindex,char *fileName,int fpart)
 		Storage_Lock();
 		GosIndex* handle_index = (GosIndex*)Fileindex;
 
+		handle_index->fileInfo.FileFpart = 0;  //文件连续读写结束了
+		handle_index->DataSectorsEA = 0;
+
 		if(handle_index->fileInfo.recordStartTimeStamp == oldStartTimeStap 
 			|| handle_index->fileInfo.recordEndTimeStamp == oldEndTimeStap
 			|| handle_index->fileInfo.recordStartTimeStamp <= 1514736000
@@ -1785,14 +1810,25 @@ int Storage_Close(char* Fileindex,char *fileName,int fpart)
 			break;
 		}
 		
-		//更新索引
-		handle_index->fileInfo.FileFpart = 0;  //文件连续读写结束了
-		handle_index->DataSectorsEA = 0;
 		handle_index->fileInfo.filestate = NON_EMPTY_OK;
+		gHeadIndex.CurrIndexPos = handle_index->fileInfo.fileIndex;
+
+		lseek64(fpart,gHeadIndex.HeadStartSector * DEFAULT_SECTOR_SIZE, SEEK_SET);
+		if (write(fpart,(char *)(&gHeadIndex), sizeof(HeadIndex)) != (int)sizeof(HeadIndex))
+		{
+			LOGE_print("write gHeadIndex error");
+			break;
+		}
+
+		unsigned long all_gos_indexSize = sizeof(GosIndex) * gHeadIndex.lRootDirFileNum;
+		if (write(fpart,(char *)(gAVIndexList), all_gos_indexSize) != (int)all_gos_indexSize)
+		{
+			LOGE_print("write gAVIndexList error");
+			break;
+		}
+
+		fsync(fpart);
 		Storage_Unlock();
-		
-		Storage_Write_gos_index(fpart, RECORD_FILE_H264);
-		sync();
 		
 		return 0;
 	}while(0);
@@ -1884,8 +1920,8 @@ int Storage_Write(char* Fileindex,const void *data,unsigned int dataSize,int fpa
 		{
 			handle_index->fileInfo.fileSize = 0;
 			handle_index->DataSectorsEA = handle_index->DataSectorsNum * DEFAULT_SECTOR_SIZE;
-			handle_index->fileInfo.FileFpart = 1;
 		}
+		handle_index->fileInfo.FileFpart = 1;
 		
 		//文件的长度不能超过预分配给每个文件的大小 
 		if((handle_index->fileInfo.fileSize + dataSize) > FILE_MAX_LENTH)
@@ -1902,11 +1938,17 @@ int Storage_Write(char* Fileindex,const void *data,unsigned int dataSize,int fpa
 			LOGE_print("write error nlen = %d dataSize:%d", nlen, dataSize);
 			break;
 		}
-
+		
 		//更新写地址和当前文件长度
 		handle_index->DataSectorsEA += nlen;
-		handle_index->fileInfo.fileSize += nlen;
-
+//		handle_index->fileInfo.fileSize += nlen;
+		unsigned long long beyondSize;
+		beyondSize = handle_index->DataSectorsEA - handle_index->DataSectorsNum * DEFAULT_SECTOR_SIZE;
+		if(beyondSize > handle_index->fileInfo.fileSize)
+		{
+			handle_index->fileInfo.fileSize += (beyondSize - handle_index->fileInfo.fileSize); 
+		}
+		
 		Storage_Unlock();
 		return nlen;
 	}while(0);
@@ -2575,6 +2617,15 @@ unsigned int GetDiskInfo_Usable()
 
 char* Mux_open(const char *fileName)
 {
+	Storage_Lock();
+	if(NULL == gAVIndexList || (!StorageCheckSDExist()))
+	{
+		LOGE_print("gAVIndexList:%p SDExist:0", gAVIndexList);
+		Storage_Unlock();
+		return NULL;
+	}
+	Storage_Unlock();
+	
 	if(fileName == NULL || RemoveSdFlag == 1)
 	{
 		LOGE_print("fileName:%p RemoveSdFlag:%d", fileName, RemoveSdFlag);
@@ -2585,6 +2636,15 @@ char* Mux_open(const char *fileName)
 
 int Mux_close(char* Fileindex,char *fileName)
 {
+	Storage_Lock();
+	if(NULL == gAVIndexList || (!StorageCheckSDExist()))
+	{
+		LOGE_print("gAVIndexList:%p SDExist:0", gAVIndexList);
+		Storage_Unlock();
+		return -1;
+	}
+	Storage_Unlock();
+
 	if(Fileindex == NULL || fileName == NULL || RemoveSdFlag == 1)
 	{
 		LOGE_print("Fileindex:%p fileName:%p RemoveSdFlag:%d", Fileindex, fileName, RemoveSdFlag);
@@ -2595,6 +2655,15 @@ int Mux_close(char* Fileindex,char *fileName)
 
 int Mux_write(char* Fileindex,const void *data,unsigned int dataSize)
 {	
+	Storage_Lock();
+	if(NULL == gAVIndexList || (!StorageCheckSDExist()))
+	{
+		LOGE_print("gAVIndexList:%p SDExist:0", gAVIndexList);
+		Storage_Unlock();
+		return -1;
+	}
+	Storage_Unlock();
+
 	if(Fileindex == NULL || data == NULL || dataSize <= 0 || RemoveSdFlag == 1)
 	{
 		LOGE_print("Fileindex:%p data:%p dataSize:%d RemoveSdFlag:%d", Fileindex, data, dataSize, RemoveSdFlag);
@@ -3280,7 +3349,8 @@ int Mux_SetLastFileAlarmType(char *CurrFp,int AlarmType,int flag)
 	GosIndex *pGos_indexList;
 	GosIndex *pGos_Last_indexList;
 	pGos_indexList = (GosIndex*)CurrFp;
-	
+
+	Storage_Lock();
 	if(pGos_indexList == &gAVIndexList[1])
 	{
 		pGos_Last_indexList = &gAVIndexList[gHeadIndex.lRootDirFileNum-1];
@@ -3294,6 +3364,7 @@ int Mux_SetLastFileAlarmType(char *CurrFp,int AlarmType,int flag)
 	{
 		pGos_indexList->fileInfo.alarmType = AlarmType;
 		LOGI_print("[record lib]: currfd -> %d , alarm type - > %d",pGos_Last_indexList->fileInfo.fileIndex,pGos_Last_indexList->fileInfo.alarmType);
+		Storage_Unlock();
 		return 0;
 	}
 	else
@@ -3302,10 +3373,12 @@ int Mux_SetLastFileAlarmType(char *CurrFp,int AlarmType,int flag)
 		{
 			pGos_Last_indexList->fileInfo.alarmType = AlarmType;
 			LOGI_print("[record lib]: lastfd -> %d , alarm type - > %d",pGos_Last_indexList->fileInfo.fileIndex,pGos_Last_indexList->fileInfo.alarmType);
+			Storage_Unlock();
 			return 0;
 		}
 	}
 
+	Storage_Unlock();
 	return -1;
 }
 
@@ -3375,42 +3448,61 @@ void *Gos_DiskManager_proc(void *p)
 	
 	while(1)
 	{
-		if(FormatSdFlag == 1)
-		{
-			LOGW_print("is formatting sd !!");
-			sleep(1);
-			continue;
-		}
-		if(!CheckSdIsMount())
-		{
-			LOGW_print("IsMoun=false, fPart:%d", fPart);
-			RemoveSdFlag = 1;
-			if (fPart > 0 )
-			{
-				sleep(2);
-				Storage_Close_All();
-				FormatSdFlag = 0;
-			}
-			flagInit = 1;
-			sleep(1);
-			continue;
-		}
-		if(flagInit && CheckSdIsMount())
+		Storage_Lock();
+//		if(FormatSdFlag == 1)
+//		{
+//			LOGW_print("is formatting sd !!");
+//			Storage_Unlock();
+//			sleep(1);
+//			continue;
+//		}
+//		if(!CheckSdIsMount())
+//		{
+//			LOGW_print("IsMoun=false, fPart:%d", fPart);
+//			RemoveSdFlag = 1;
+//			if (fPart > 0 )
+//			{
+//				Storage_Unlock();
+//				sleep(2);
+//				Storage_Close_All();
+//				FormatSdFlag = 0;
+//			}
+//			else
+//			{
+//				Storage_Unlock();
+//			}
+//			flagInit = 1;
+//			sleep(1);
+//			continue;
+//		}
+//		if(flagInit && CheckSdIsMount())
+		if(fPart == -1 && CheckSdIsMount())
 		{
 			sprintf(flagFileName,"%s/%s",SDDirName,"1q2w3e4r5t.dat");
 			if((Flagfp = fopen(flagFileName,"r+")) != NULL)
 			{
 				fclose(Flagfp);
+				Storage_Unlock();
 				LOGW_print("SD Find 1q2w3e4r5t.dat exist,Don't to predistribution!!");
 			}
 			else
 			{
-				Storage_Init(0);
+				Storage_Unlock();
+				if(FormatSdFlag == 1)
+				{
+					Storage_Init(1);
+				}
+				else
+				{
+					Storage_Init(0);
+				}
+				
 				RemoveSdFlag = 0;
 			}
 			
 			flagInit = 0;
 		}	
+		Storage_Unlock();
 		usleep(1000*1000);
 	}
 
