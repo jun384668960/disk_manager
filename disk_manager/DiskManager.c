@@ -1538,7 +1538,7 @@ int StorageDirEntryUpdate(int fpart, GosIndex* index, char *fileName)
 		index->fileInfo.alarmType = alarmtype - 'a';
 		sprintf(fileName,"%04d%02d%02d%02d%02d%02d0%c.H264",tm_year,tm_mon,tm_mday,tm_hour,tm_min,(tm_sec/2)*2,index->fileInfo.alarmType+'a');
 		strcpy(longName,fileName);
-		LOGI_print("close filename %s",fileName);
+		LOGD_print("close filename %s",fileName);
 	}
 
 	sprintf(shortname,"%06d%s", index->fileInfo.fileIndex, "~1DAT");
@@ -1717,6 +1717,12 @@ int Storage_Close_All()
 		close(fPart);
 		fPart = -1;
 	}
+	else
+	{
+		LOGI_print("fPart:%d nothing opened", fPart);
+		Storage_Unlock();
+		return -1;
+	}
 	
 	setMaxWriteSize(0);
 
@@ -1768,7 +1774,7 @@ char* Storage_Open(const char *fileName)
 	gHeadIndex.CurrIndexPos = handle_index->fileInfo.fileIndex;
 	Storage_Unlock();
 	
-	LOGI_print("open CurrIndexPos DiskFd index=%d",handle_index->fileInfo.fileIndex);
+	LOGD_print("open CurrIndexPos DiskFd index=%d",handle_index->fileInfo.fileIndex);
 	return (char*)handle_index;
 }
 
@@ -3449,33 +3455,6 @@ void *Gos_DiskManager_proc(void *p)
 	while(1)
 	{
 		Storage_Lock();
-//		if(FormatSdFlag == 1)
-//		{
-//			LOGW_print("is formatting sd !!");
-//			Storage_Unlock();
-//			sleep(1);
-//			continue;
-//		}
-//		if(!CheckSdIsMount())
-//		{
-//			LOGW_print("IsMoun=false, fPart:%d", fPart);
-//			RemoveSdFlag = 1;
-//			if (fPart > 0 )
-//			{
-//				Storage_Unlock();
-//				sleep(2);
-//				Storage_Close_All();
-//				FormatSdFlag = 0;
-//			}
-//			else
-//			{
-//				Storage_Unlock();
-//			}
-//			flagInit = 1;
-//			sleep(1);
-//			continue;
-//		}
-//		if(flagInit && CheckSdIsMount())
 		if(fPart == -1 && CheckSdIsMount())
 		{
 			sprintf(flagFileName,"%s/%s",SDDirName,"1q2w3e4r5t.dat");
@@ -3488,7 +3467,8 @@ void *Gos_DiskManager_proc(void *p)
 			else
 			{
 				Storage_Unlock();
-				if(FormatSdFlag == 1)
+				//当没有过拔卡操作，且有强制格式化
+				if(FormatSdFlag == 1 && RemoveSdFlag == 0)
 				{
 					Storage_Init(1);
 				}
@@ -3502,6 +3482,12 @@ void *Gos_DiskManager_proc(void *p)
 			
 			flagInit = 0;
 		}	
+		else if(!CheckSdIsMount() && fPart > 0)//当卡拔出时，释放索引，并且标志拔卡动作
+		{
+			RemoveSdFlag = 1;
+			Storage_Close_All();
+		}
+		
 		Storage_Unlock();
 		usleep(1000*1000);
 	}

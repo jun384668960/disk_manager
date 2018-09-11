@@ -30,7 +30,7 @@ all : $(TARGET)
 	$(CXX) $(CXXFLAGS) -MMD -MP -MF"$(@:%.obj=%.dep)" -MT"$(@:%.obj=%.dep)" -c $< -o $@
 
 $(TARGET) : $(OBJ)
-	$(LIBRARY_LINK_STATIC) $@ $ $(OBJ)
+	$(LIBRARY_LINK_STATIC) $@ $^
 
 clean:
 	@rm -rf $(OBJ) $(DEP) $(TARGET)
