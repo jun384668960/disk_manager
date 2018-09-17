@@ -1662,6 +1662,7 @@ int Storage_Init(int mkfs_vfat)
 		if(fPart < 0 )
 		{
 			LOGE_print("fPart:%d open szPartName=%s Failed!!!", fPart, szPartName);
+			Storage_Unlock();
 			return -1;
 		}	
 		else
@@ -1682,7 +1683,12 @@ int Storage_Init(int mkfs_vfat)
 		StoragepopenRead(command);
 		//½øÐÐÔ¤·ÖÅä	
 		int bRet = FormatParttion(fPart, FILE_MAX_LENTH, lAviNumtemp, lLogSizeMtemp );	
-		
+		if(bRet != 0)
+		{
+			LOGE_print("FormatParttion error!");
+			Storage_Unlock();
+			return -1;
+		}
 		memset(command,0,sizeof(command));
 		sprintf(command,"mount -t vfat %s %s",szPartName,SDDirName);
 		StoragepopenRead(command);
