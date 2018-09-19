@@ -1705,6 +1705,8 @@ int Storage_Init(int mkfs_vfat)
 	LOGI_print("all_gos_indexSize %d",all_gos_indexSize);
 	memset(gAVIndexList, 0, all_gos_indexSize);
 	read(fPart,&gAVIndexList[0],all_gos_indexSize);
+
+//	Mux_Print_fd_time();
 	
 	FormatSdFlag = 0;
 	LOGI_print( "storage init do_success!!!");
@@ -1777,7 +1779,7 @@ char* Storage_Open(const char *fileName)
 	//更新全局标志
 	oldStartTimeStap = handle_index->fileInfo.recordStartTimeStamp;
 	oldEndTimeStap   = handle_index->fileInfo.recordEndTimeStamp;
-	gHeadIndex.CurrIndexPos = handle_index->fileInfo.fileIndex;
+	gHeadIndex.CurrIndexPos = handle_index->fileInfo.fileIndex;	//正常结束才更新? 这里不注释可以避免坏块
 	Storage_Unlock();
 	
 	LOGD_print("open CurrIndexPos DiskFd index=%d",handle_index->fileInfo.fileIndex);
@@ -2708,8 +2710,34 @@ int Mux_Print_fd_time()
 	{
 		if(tmpIndex->fileInfo.filestate == NON_EMPTY_OK)
 		{
-			LOGI_print("fd:%d  start: %d   end : %d  alarmType : %d",tmpIndex->fileInfo.fileIndex,tmpIndex->fileInfo.recordStartTimeStamp,
-				tmpIndex->fileInfo.recordEndTimeStamp,tmpIndex->fileInfo.alarmType);
+			LOGI_print("SClu:%u CluNum:%u CluEA:%u DirNum:%llu DirEA:%u DataNum:%llu DataEA:%llu"
+				, tmpIndex->startCluster
+				, tmpIndex->CluSectorsNum
+				, tmpIndex->CluSectorsEA
+				, tmpIndex->DirSectorsNum
+				, tmpIndex->DirSectorsEA
+				, tmpIndex->DataSectorsNum
+				, tmpIndex->DataSectorsEA);
+			LOGI_print("type:%d part:%d index:%d state:%d date:%d time:%d spts:%u epts:%u size:%lu"
+				, tmpIndex->fileInfo.alarmType
+				, tmpIndex->fileInfo.FileFpart
+				, tmpIndex->fileInfo.fileIndex
+				, tmpIndex->fileInfo.filestate
+				, tmpIndex->fileInfo.recordStartDate
+				, tmpIndex->fileInfo.recordStartTime
+				, tmpIndex->fileInfo.recordStartTimeStamp
+				, tmpIndex->fileInfo.recordEndTimeStamp
+				, tmpIndex->fileInfo.fileSize);
+			
+			int tm_hour = (tmpIndex->fileInfo.recordStartTime >> 11) & 0x1F;
+			int tm_min  = (tmpIndex->fileInfo.recordStartTime >> 5) & 0x3F;
+			int tm_sec  = (tmpIndex->fileInfo.recordStartTime) & 0x1F;
+
+			int tm_year = (tmpIndex->fileInfo.recordStartDate >> 9) & 0x7F;
+			int tm_mon  = (tmpIndex->fileInfo.recordStartDate >> 5) & 0x0F;
+			int tm_mday = (tmpIndex->fileInfo.recordStartDate) & 0x1F;	
+
+			LOGI_print("filename:%04d%02d%02d%02d%02d%02d0%c.H264",tm_year+1980,tm_mon,tm_mday,tm_hour,tm_min,tm_sec*2, tmpIndex->fileInfo.alarmType+'a');
 		}
 		tmpIndex++;
 	}
