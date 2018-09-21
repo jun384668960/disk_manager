@@ -60,7 +60,7 @@ void CreateLongFileItem(long_msdos_dir_entry *de,unsigned char *shortname,
 						unsigned long filesize,unsigned char nClusterSize,
 						char attribute);
 int   FormatjpegDir(int fpart);
-int   FormatParttion(int fpart, unsigned long filesize, unsigned long lAviNum,unsigned long eventlogSizeM);
+int   FormatParttion(int fpart, LONGLONG cblocks, unsigned long filesize, unsigned long lAviNum,unsigned long eventlogSizeM);
 int   Find_head_index(int fpart);
 GosIndex* Get_Oldest_file();
 GosIndex* Get_Oldest_Alarm_file();
@@ -93,6 +93,7 @@ GosIndex *gAVIndexList;     	//裸文件索引
 HeadIndex gHeadIndex;			//索引头
 static __u32 oldStartTimeStap = 0; //用于判断循环覆盖是否成功
 static __u32 oldEndTimeStap   = 0; //用于判断循环覆盖是否成功
+static __u32 real_file_max_size = FILE_MAX_LENTH;	//真正的区分文件最大，这将影响实际可写文件个数
 
 int MaxWriteSize = 0;
 
@@ -388,49 +389,64 @@ int FormatjpegDir(int fpart)
 	return 0;
 }
 
-int FormatParttion(int fpart, unsigned long filesize, unsigned long lAviNum,unsigned long eventlogSizeM /*, bool bigDiskFlag*/)
+LONGLONG hd_cblocks_get(int fpart)
 {
-	//获取分区的物理信息，
-	hd_geometry geometry;
-	if ( ioctl(fpart, HDIO_GETGEO, &geometry) )
-		return -1;
-
 	//得到分区的大小
 	LONGLONG cblocks;	// 单位是 512 字节
 	
-	//if ( true == bigDiskFlag )
+	//说明当前是超大容量磁盘
+	LONG sz;	  
+	LONGLONG b;
+	int err;
+
+	err = ioctl( fpart, BLKGETSIZE64, &b );
+	if(err == 0)
 	{
-		//说明当前是超大容量磁盘
-		LONG sz;	  
-		LONGLONG b;
-		int err;
-	
-		err = ioctl( fpart, BLKGETSIZE64, &b );
+		LOGI_print("disk_size=%lld errcode=%d",b , err);
+		cblocks = ( b >> 9 );	//总共扇区数
+	}
+	else
+	{
+		err = ioctl(fpart, BLKGETSIZE, &sz);
 		if(err == 0)
 		{
-			LOGI_print("disk_size=%lld errcode=%d",b , err);
-			cblocks = ( b >> 9 );	//总共扇区数
+			LOGI_print("disk_size=%ld errcode=%d",sz , err);
+			cblocks = sz;
 		}
 		else
 		{
-			err = ioctl(fpart, BLKGETSIZE, &sz);
-			if(err == 0)
-			{
-				LOGI_print("disk_size=%ld errcode=%d",sz , err);
-				cblocks = sz;
-			}
-			else
-			{
-				LOGE_print("get BLKGETSIZE error");
-			}
+			LOGE_print("get BLKGETSIZE error");
+			return -1;
 		}
-	
-		LOGI_print("cblocks..000...111==%llu",cblocks);	
-		//减去 10M 的空间不分区
-		cblocks -= 10*1024*2; // 1kB = 2个扇区 得到所有需要分区的扇区
 	}
 
-	LOGI_print("cblocks..222!");	
+	LOGI_print("cblocks..000...111==%llu",cblocks); 
+
+	unsigned long long VolSize = cblocks*SECTORS_PER_BLOCK;//
+	LOGI_print("VolSize:%llu cblocks:%llu BLOCK_SIZE:%d SECTORS_PER_BLOCK:%d", VolSize, cblocks, BLOCK_SIZE, SECTORS_PER_BLOCK);
+	//先给cluster_size赋一个粗值
+	real_file_max_size = FILE_MAX_LENTH;
+	if(VolSize >= 490766336)
+	{
+		real_file_max_size = (4*1024*1024);
+	}
+	else if(VolSize >= 249405440)
+	{
+		real_file_max_size = (3*1024*1024);
+	}
+
+	return cblocks;
+}
+
+int FormatParttion(int fpart, LONGLONG cblocks, unsigned long filesize, unsigned long lAviNum,unsigned long eventlogSizeM /*, bool bigDiskFlag*/)
+{
+	hd_geometry geometry;
+	if ( ioctl(fpart, HDIO_GETGEO, &geometry) )
+		return -1;
+	
+	LOGI_print("cblocks..000...111==%llu",cblocks);	
+	//减去 10M 的空间不分区
+	cblocks -= 10*1024*2; // 1kB = 2个扇区 得到所有需要分区的扇区
 
 	///获得文件的状态信息
 	struct stat statbuf;
@@ -497,28 +513,39 @@ int FormatParttion(int fpart, unsigned long filesize, unsigned long lAviNum,unsi
 	//计算出参数cluster_size fat32_length的取值
 	unsigned long long VolSize = cblocks*SECTORS_PER_BLOCK;//
 
-	LOGI_print("cblocks..444!");	
+	LOGI_print("VolSize:%llu cblocks..444!", VolSize);	
 
 	//先给cluster_size赋一个粗值
 	if ( VolSize <= 66600 )
 	{
 		LOGE_print("Volume too small for FAT32!" );
 		return -1;
-	}else if ( VolSize <= 532480 )
+	}
+	else if ( VolSize <= 532480 )
+	{
 		mbs.cluster_size = 1;
+	}
 	else if (VolSize <= 16777216)
+	{
 		mbs.cluster_size = 8;
+	}
 	else if (VolSize <= 33554432)
+	{
 		mbs.cluster_size = 16;
+	}
 	else if (VolSize <= 67108864)
+	{
 		mbs.cluster_size = 32;
+	}
 	else
+	{
 		mbs.cluster_size = 64;
+	}
 
 	//为cluster_size选择一个合适的值
 	unsigned long  lTotalSectors = (unsigned long) cblocks; 
 
-	LOGI_print("cblocks==%lld  lTotalSectors=%lu",cblocks ,lTotalSectors );
+	LOGI_print("cblocks==%lld  lTotalSectors=%lu cluster_size:%d",cblocks ,lTotalSectors, mbs.cluster_size);
 	
 	unsigned long long lFatData = lTotalSectors - DBR_RESERVED_SECTORS;	 //剩余需要分区的扇区个数
 	int maxclustsize = 128;	
@@ -624,6 +651,7 @@ int FormatParttion(int fpart, unsigned long filesize, unsigned long lAviNum,unsi
 
 	//根目录文件的大小(字节数)
 	unsigned long lRootFileSize = lClustersofRoot * mbs.cluster_size * DEFAULT_SECTOR_SIZE;
+	LOGI_print("lRootFileSize:%ld", lRootFileSize);
 	struct long_msdos_dir_entry* pRootDir = NULL; //指向根目录文件
 	if ((pRootDir = (struct long_msdos_dir_entry *)malloc (lRootFileSize)) == NULL)
 	{
@@ -648,7 +676,7 @@ int FormatParttion(int fpart, unsigned long filesize, unsigned long lAviNum,unsi
    	//有实际簇的个数得到的视频文件数
    	lClust32 -= (10*1024*1024)/(mbs.cluster_size * DEFAULT_SECTOR_SIZE);  //去掉10M的空间不分配
     //unsigned long lActualAviNum = (lClust32 - (lStartClu -2) - PIC_PARTITION_SIZE)/lClustersofFile;
-	unsigned long clu = (FILE_MAX_LENTH) / (mbs.cluster_size * DEFAULT_SECTOR_SIZE);
+	unsigned long clu = (real_file_max_size) / (mbs.cluster_size * DEFAULT_SECTOR_SIZE);
 	unsigned long lActualAviNum = lClust32  / clu;
 
 	LOGI_print("clu=%d lActualAviNum=%d lClust32=%d",clu,lActualAviNum,lClust32);
@@ -660,6 +688,7 @@ int FormatParttion(int fpart, unsigned long filesize, unsigned long lAviNum,unsi
 	gHeadIndex.HeadStartSector = lClustersofRoot*gHeadIndex.ClusterSize+gHeadIndex.RootStartSector;
 	
 	unsigned long all_gos_indexSize = sizeof(GosIndex)*gHeadIndex.lRootDirFileNum;
+	LOGI_print("all_gos_indexSize:%ld FileNum:%l", all_gos_indexSize, gHeadIndex.lRootDirFileNum);
 	struct GosIndex* pGos_index = NULL; 
 	if ((pGos_index = (struct GosIndex *)malloc (all_gos_indexSize)) == NULL)
 	{
@@ -896,10 +925,10 @@ int FormatParttion(int fpart, unsigned long filesize, unsigned long lAviNum,unsi
 	}	
 
 	gHeadIndex.JpegStartEA  = lseek(fpart,0,SEEK_CUR);
-	gHeadIndex.ChildStartCluster = ppIndex->startCluster + FILE_MAX_LENTH/(gHeadIndex.ClusterSize*DEFAULT_SECTOR_SIZE);
-	gHeadIndex.ChildStartSector = ppIndex->DataSectorsNum + FILE_MAX_LENTH/DEFAULT_SECTOR_SIZE;
+	gHeadIndex.ChildStartCluster = ppIndex->startCluster + real_file_max_size/(gHeadIndex.ClusterSize*DEFAULT_SECTOR_SIZE);
+	gHeadIndex.ChildStartSector = ppIndex->DataSectorsNum + real_file_max_size/DEFAULT_SECTOR_SIZE;
 	gHeadIndex.ChildClusterListEA = ppIndex->CluSectorsNum* DEFAULT_SECTOR_SIZE 
-		+  ppIndex->CluSectorsEA + FILE_MAX_LENTH /(gHeadIndex.ClusterSize*DEFAULT_SECTOR_SIZE)*4;
+		+  ppIndex->CluSectorsEA + real_file_max_size /(gHeadIndex.ClusterSize*DEFAULT_SECTOR_SIZE)*4;
 
 	gHeadIndex.ChildItemEA = ppIndex->DirSectorsNum*DEFAULT_SECTOR_SIZE + ppIndex->DirSectorsEA + LONG_DIR_ITEM_SIZE;
 
@@ -1452,12 +1481,12 @@ int StorageFatUpdate(int fpart, GosIndex* index)
 	//更新FAT
 	LONG len = index->fileInfo.fileSize;
 	int cuCount = len / (gHeadIndex.ClusterSize*DEFAULT_SECTOR_SIZE); //这个文件占的簇数
-	int allCount = FILE_MAX_LENTH/(gHeadIndex.ClusterSize*DEFAULT_SECTOR_SIZE);
+	int allCount = real_file_max_size/(gHeadIndex.ClusterSize*DEFAULT_SECTOR_SIZE);
 	if(len % (gHeadIndex.ClusterSize * DEFAULT_SECTOR_SIZE) != 0)
 	{
 		cuCount += 1;  //不整除,分配多一簇
 	}
-	if(FILE_MAX_LENTH % (gHeadIndex.ClusterSize * DEFAULT_SECTOR_SIZE) != 0)
+	if(real_file_max_size % (gHeadIndex.ClusterSize * DEFAULT_SECTOR_SIZE) != 0)
 	{
 		allCount +=1;  //不整除,分配多一簇
 	}
@@ -1477,15 +1506,22 @@ int StorageFatUpdate(int fpart, GosIndex* index)
 	}
 	memset(pfat,0,allCount*sizeof(int));
 	int *ptmp = &pfat[0];
+	/*
+	 如果某个簇未被分配使用，它所对应的FAT表项内的FAT表项值即用0进行填充，表示该FAT表项所对应的簇未分配使用。 
+     当某个簇已被分配使用时，则它对应的FAT表项值也就是该文件的下一个存储位置的簇号。如果该文件结束于该簇，则在它的FAT表项中记录的是一个文件结束标记，对于FAT32而言，代表文件结束的FAT表项值为0x0FFFFFFF。 
+     如果某个簇存在坏扇区，则整个簇会用FAT表项值0x0FFFFFF7标记为坏簇，不再使用，这个坏簇标记就记录在它所对应的FAT表项中。 
+     由于簇号起始于2，所以FAT表的0号表项与1号表项不与任何簇对应。FAT32的0号表项值总是“F8FFFF0F”。1号表项可能被用于记录脏标志，以说明文件系统没有被正常卸载或者磁盘表面存在错误。不过此值似乎并不重要，因此我们只要了解就可以。正常情况下，1号表项值为“FFFFFFFF”或“FFFFFF0F"。 
+	*/
 	for(i=0; i<allCount; i++)
 	{
-		if(i==0 || i==cuCount)
+		if(i==0)
 		{
 			*ptmp = 0XFFFFFFFF; // 1号表项
 		}
 		else if(i==cuCount)
 		{
 			*ptmp = 0X0FFFFFFF; // 文件结束于该簇
+			break;
 		}
 		else
 		{
@@ -1543,7 +1579,7 @@ int StorageDirEntryUpdate(int fpart, GosIndex* index, char *fileName)
 
 	sprintf(shortname,"%06d%s", index->fileInfo.fileIndex, "~1DAT");
 	start = index->startCluster;
-	CreateLongFileItem(&dir_entry, shortname, longName, start, FILE_MAX_LENTH, gHeadIndex.ClusterSize, 0x20);
+	CreateLongFileItem(&dir_entry, shortname, longName, start, real_file_max_size, gHeadIndex.ClusterSize, 0x20);
 	
 	dir_entry.dir_entry.time = index->fileInfo.recordStartTime;
 	dir_entry.dir_entry.date = index->fileInfo.recordStartDate;
@@ -1672,7 +1708,13 @@ int Storage_Init(int mkfs_vfat)
 
 	}
 	
-	
+	LONGLONG cblocks = hd_cblocks_get(fPart);
+	if(cblocks <= 0)
+	{
+		LOGE_print("error cblocks read");
+		return -1;
+	}
+
 	/********************************读取索引************************************/
 	index_offset = Find_head_index(fPart);
 	//判断索引头标志，没有标志说明没有进行过预分配,开始预分配
@@ -1682,7 +1724,7 @@ int Storage_Init(int mkfs_vfat)
 		sprintf(command,"umount -fl %s",SDDirName);
 		StoragepopenRead(command);
 		//进行预分配	
-		int bRet = FormatParttion(fPart, FILE_MAX_LENTH, lAviNumtemp, lLogSizeMtemp );	
+		int bRet = FormatParttion(fPart, cblocks, real_file_max_size, lAviNumtemp, lLogSizeMtemp );	
 		if(bRet != 0)
 		{
 			LOGE_print("FormatParttion error!");
@@ -1702,7 +1744,7 @@ int Storage_Init(int mkfs_vfat)
 		Storage_Unlock();
 		return -1;
 	}
-	LOGI_print("all_gos_indexSize %d",all_gos_indexSize);
+	LOGI_print("all_gos_indexSize %d FileNum:%u",all_gos_indexSize, gHeadIndex.lRootDirFileNum);
 	memset(gAVIndexList, 0, all_gos_indexSize);
 	read(fPart,&gAVIndexList[0],all_gos_indexSize);
 
@@ -1938,9 +1980,9 @@ int Storage_Write(char* Fileindex,const void *data,unsigned int dataSize,int fpa
 		handle_index->fileInfo.FileFpart = 1;
 		
 		//文件的长度不能超过预分配给每个文件的大小 
-		if((handle_index->fileInfo.fileSize + dataSize) > FILE_MAX_LENTH)
+		if((handle_index->fileInfo.fileSize + dataSize) > real_file_max_size)
 		{
-			LOGE_print("error fileSize:%d + dataSize:%d > maxfilesize:%d", handle_index->fileInfo.fileSize, dataSize, FILE_MAX_LENTH);
+			LOGE_print("error fileSize:%d + dataSize:%d > maxfilesize:%d", handle_index->fileInfo.fileSize, dataSize, real_file_max_size);
 			break;
 		}
 
@@ -2617,9 +2659,9 @@ unsigned int GetDiskInfo_Usable()
 		pGos_indexList++;
 	}
 	
-	unsigned int UsableRootM = FILE_MAX_LENTH / (1024*1024);
+	unsigned int UsableRootM = real_file_max_size / (1024*1024);
 
-	if(FILE_MAX_LENTH % (1024*1024) != 0)
+	if(real_file_max_size % (1024*1024) != 0)
 	{
 		UsableRootM += 1;
 	}
